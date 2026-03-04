@@ -1,5 +1,6 @@
 mod camera;
 mod layer_shell;
+mod mouse;
 mod overlay;
 mod renderer;
 mod settings;
