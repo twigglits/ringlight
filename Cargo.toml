@@ -1,0 +1,16 @@
+[package]
+name = "ringlight"
+version = "0.1.0"
+edition = "2021"
+description = "Desktop ring light overlay for Ubuntu (Wayland/GNOME)"
+
+[dependencies]
+gtk = { version = "0.18", features = ["v3_24"] }
+gdk = "0.18"
+cairo-rs = "0.18"
+gio = "0.18"
+glib = "0.18"
+ksni = "0.2"
+
+[build-dependencies]
+pkg-config = "0.3"
