@@ -103,6 +103,7 @@ fn get_monitor_size(window: &gtk::Window) -> (i32, i32) {
             return (geom.width(), geom.height());
         }
     }
+    eprintln!("ringlight: warning: could not detect monitor size, using 1920x1080 fallback");
     (1920, 1080)
 }
 

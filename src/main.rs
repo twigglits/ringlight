@@ -1,4 +1,5 @@
 mod camera;
+mod extension_installer;
 mod layer_shell;
 mod mouse;
 mod overlay;
@@ -17,6 +18,8 @@ fn main() {
     );
 
     application.connect_activate(|app| {
+        extension_installer::ensure_extension_installed();
+
         let state = new_shared_state();
 
         // Create overlay window

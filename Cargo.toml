@@ -3,6 +3,11 @@ name = "ringlight"
 version = "0.1.0"
 edition = "2021"
 description = "Desktop ring light overlay for Ubuntu (Wayland/GNOME)"
+license = "GPL-3.0"
+authors = ["Jean Naude"]
+repository = "https://github.com/twigglits/ringlight"
+keywords = ["ringlight", "webcam", "overlay", "gnome", "wayland"]
+categories = ["gui"]
 
 [dependencies]
 gtk = { version = "0.18", features = ["v3_24"] }

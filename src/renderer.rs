@@ -38,7 +38,7 @@ pub fn draw_glow(cr: &Context, width: f64, height: f64, state: &RingLightState) 
     hole.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, 1.0); // fully erase at center
     hole.add_color_stop_rgba(0.6, 0.0, 0.0, 0.0, 0.8);  // still mostly erased
     hole.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 0.0);  // no erase at edge
-    cr.set_source(&hole).unwrap();
+    let _ = cr.set_source(&hole);
     let _ = cr.paint();
 }
 
@@ -56,7 +56,7 @@ fn draw_edge_glow(
     let gradient = cairo::LinearGradient::new(0.0, 0.0, 0.0, glow_width);
     gradient.add_color_stop_rgba(0.0, r, g, b, alpha);
     gradient.add_color_stop_rgba(1.0, r, g, b, 0.0);
-    cr.set_source(&gradient).unwrap();
+    let _ = cr.set_source(&gradient);
     cr.rectangle(0.0, 0.0, width, glow_width);
     let _ = cr.fill();
 
@@ -64,7 +64,7 @@ fn draw_edge_glow(
     let gradient = cairo::LinearGradient::new(0.0, height, 0.0, height - glow_width);
     gradient.add_color_stop_rgba(0.0, r, g, b, alpha);
     gradient.add_color_stop_rgba(1.0, r, g, b, 0.0);
-    cr.set_source(&gradient).unwrap();
+    let _ = cr.set_source(&gradient);
     cr.rectangle(0.0, height - glow_width, width, glow_width);
     let _ = cr.fill();
 
@@ -72,7 +72,7 @@ fn draw_edge_glow(
     let gradient = cairo::LinearGradient::new(0.0, 0.0, glow_width, 0.0);
     gradient.add_color_stop_rgba(0.0, r, g, b, alpha);
     gradient.add_color_stop_rgba(1.0, r, g, b, 0.0);
-    cr.set_source(&gradient).unwrap();
+    let _ = cr.set_source(&gradient);
     cr.rectangle(0.0, 0.0, glow_width, height);
     let _ = cr.fill();
 
@@ -80,7 +80,7 @@ fn draw_edge_glow(
     let gradient = cairo::LinearGradient::new(width, 0.0, width - glow_width, 0.0);
     gradient.add_color_stop_rgba(0.0, r, g, b, alpha);
     gradient.add_color_stop_rgba(1.0, r, g, b, 0.0);
-    cr.set_source(&gradient).unwrap();
+    let _ = cr.set_source(&gradient);
     cr.rectangle(width - glow_width, 0.0, glow_width, height);
     let _ = cr.fill();
 }

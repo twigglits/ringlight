@@ -45,7 +45,9 @@ const REL_Y: u16 = 0x01;
 fn find_mouse_event_device() -> Option<String> {
     let devices = std::fs::read_to_string("/proc/bus/input/devices").ok()?;
     for section in devices.split("\n\n") {
-        let handlers_line = section.lines().find(|l| l.starts_with("H: Handlers="))?;
+        let Some(handlers_line) = section.lines().find(|l| l.starts_with("H: Handlers=")) else {
+            continue;
+        };
         if handlers_line.contains("mouse") {
             for part in handlers_line.split_whitespace() {
                 if part.starts_with("event") {
@@ -60,8 +62,8 @@ fn find_mouse_event_device() -> Option<String> {
 /// Start a background thread that reads raw mouse events from /dev/input/eventN.
 pub fn start_raw_tracker(screen_width: f64, screen_height: f64) -> Option<SharedMousePos> {
     let device = find_mouse_event_device().or_else(|| {
-        eprintln!("ringlight: could not find mouse event device, trying /dev/input/event3");
-        Some("/dev/input/event3".to_string())
+        eprintln!("ringlight: could not find mouse event device in /proc/bus/input/devices");
+        None
     })?;
 
     let file = match File::open(&device) {
@@ -88,7 +90,7 @@ pub fn start_raw_tracker(screen_width: f64, screen_height: f64) -> Option<Shared
             }
             let event: &InputEvent = unsafe { &*(buf.as_ptr() as *const InputEvent) };
             if event.type_ == EV_REL {
-                let mut p = pos_thread.lock().unwrap();
+                let Ok(mut p) = pos_thread.lock() else { break };
                 match event.code {
                     REL_X => p.0 = (p.0 + event.value as f64).clamp(0.0, screen_width),
                     REL_Y => p.1 = (p.1 + event.value as f64).clamp(0.0, screen_height),

@@ -1,5 +1,5 @@
 use crate::tray::TrayCommand;
-use std::process::Command;
+use std::fs;
 use std::time::Duration;
 
 /// Detect video devices present on the system
@@ -14,24 +14,44 @@ fn detect_video_devices() -> Vec<String> {
     devices
 }
 
-/// Check if any process has a video device open using `fuser`
+/// Check if any process has a video device open by scanning /proc/*/fd/ symlinks.
 fn is_camera_in_use(devices: &[String]) -> bool {
     if devices.is_empty() {
         return false;
     }
 
-    let result = Command::new("fuser")
-        .args(devices)
-        .stderr(std::process::Stdio::null())
-        .output();
+    let proc_entries = match fs::read_dir("/proc") {
+        Ok(entries) => entries,
+        Err(_) => return false,
+    };
 
-    match result {
-        Ok(output) => {
-            // fuser returns exit code 0 if any file is accessed by a process
-            output.status.success()
+    for entry in proc_entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        // Only look at numeric (PID) directories
+        if !name_str.chars().all(|c| c.is_ascii_digit()) {
+            continue;
         }
-        Err(_) => false,
+
+        let fd_dir = entry.path().join("fd");
+        let fd_entries = match fs::read_dir(&fd_dir) {
+            Ok(entries) => entries,
+            Err(_) => continue, // permission denied or process exited
+        };
+
+        for fd_entry in fd_entries.flatten() {
+            let link_target = match fs::read_link(fd_entry.path()) {
+                Ok(target) => target,
+                Err(_) => continue,
+            };
+            let target_str = link_target.to_string_lossy().into_owned();
+            if devices.iter().any(|dev| target_str == *dev) {
+                return true;
+            }
+        }
     }
+
+    false
 }
 
 /// Start a background thread that polls camera usage every 2 seconds.
