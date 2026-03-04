@@ -1,0 +1,23 @@
+name: Publish GNOME Extension
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "gnome-extension/**"
+
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package and upload GNOME extension
+        uses: murar8/gnome-extensions-action@0.1.0
+        with:
+          source-dir: gnome-extension
+          username: ${{ secrets.GNOME_EXTENSIONS_USERNAME }}
+          password: ${{ secrets.GNOME_EXTENSIONS_PASSWORD }}
+          accept-tos: true
