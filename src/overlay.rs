@@ -55,8 +55,26 @@ pub fn create_overlay(state: SharedState) -> gtk::Window {
     // Re-apply input shape after show
     set_click_through(&window);
 
-    // Track mouse via raw input events (with X11 initial position sync)
-    if let Some(mouse_pos) = mouse::start_mouse_tracker(mon_w as f64, mon_h as f64) {
+    // Try D-Bus cursor tracking (GNOME Shell extension), fall back to raw input
+    let use_dbus = mouse::dbus_cursor_position().is_some();
+    if use_dbus {
+        eprintln!("ringlight: using D-Bus cursor tracking (GNOME Shell extension)");
+        let state_mouse = state.clone();
+        let window_mouse = window.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+            if let Some((mx, my)) = mouse::dbus_cursor_position() {
+                let mut s = state_mouse.lock().unwrap();
+                if (s.mouse_x - mx).abs() > 2.0 || (s.mouse_y - my).abs() > 2.0 {
+                    s.mouse_x = mx;
+                    s.mouse_y = my;
+                    drop(s);
+                    window_mouse.queue_draw();
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+    } else if let Some(mouse_pos) = mouse::start_raw_tracker(mon_w as f64, mon_h as f64) {
+        eprintln!("ringlight: using raw input mouse tracking (install ringlight-cursor GNOME extension for precise tracking)");
         let state_mouse = state.clone();
         let window_mouse = window.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
