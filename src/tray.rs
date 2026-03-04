@@ -1,4 +1,4 @@
-use crate::settings::SharedState;
+use crate::settings::{GlowSize, HoleSize, Preset, SharedState};
 
 /// Messages from tray to main GTK loop
 #[derive(Debug, Clone)]
@@ -9,6 +9,9 @@ pub enum TrayCommand {
     BrightnessDown,
     Warmer,
     Cooler,
+    SetGlowSize(GlowSize),
+    SetHoleSize(HoleSize),
+    ApplyPreset(Preset),
     CameraStateChanged(bool),
     Quit,
 }
@@ -60,6 +63,17 @@ impl ksni::Tray for RingLightTray {
         let state = self.state.lock().unwrap();
         let enabled = state.enabled;
         let auto_mode = state.auto_mode;
+        let glow_selected = match state.glow_size {
+            GlowSize::Small => 0,
+            GlowSize::Medium => 1,
+            GlowSize::Large => 2,
+        };
+        let hole_selected = match state.hole_size {
+            HoleSize::Off => 0,
+            HoleSize::Small => 1,
+            HoleSize::Medium => 2,
+            HoleSize::Large => 3,
+        };
         drop(state);
 
         vec![
@@ -101,7 +115,6 @@ impl ksni::Tray for RingLightTray {
                 ..Default::default()
             }
             .into(),
-            MenuItem::Separator,
             StandardItem {
                 label: "Warmer".to_string(),
                 activate: Box::new(|this: &mut Self| {
@@ -115,6 +128,96 @@ impl ksni::Tray for RingLightTray {
                 activate: Box::new(|this: &mut Self| {
                     let _ = this.sender.send(TrayCommand::Cooler);
                 }),
+                ..Default::default()
+            }
+            .into(),
+            MenuItem::Separator,
+            SubMenu {
+                label: "Glow Size".to_string(),
+                submenu: vec![
+                    RadioGroup {
+                        selected: glow_selected,
+                        select: Box::new(|this: &mut Self, idx| {
+                            let size = match idx {
+                                0 => GlowSize::Small,
+                                1 => GlowSize::Medium,
+                                _ => GlowSize::Large,
+                            };
+                            let _ = this.sender.send(TrayCommand::SetGlowSize(size));
+                        }),
+                        options: vec![
+                            RadioItem { label: "Small".to_string(), ..Default::default() },
+                            RadioItem { label: "Medium".to_string(), ..Default::default() },
+                            RadioItem { label: "Large".to_string(), ..Default::default() },
+                        ],
+                    }
+                    .into(),
+                ],
+                ..Default::default()
+            }
+            .into(),
+            SubMenu {
+                label: "Cursor Hole".to_string(),
+                submenu: vec![
+                    RadioGroup {
+                        selected: hole_selected,
+                        select: Box::new(|this: &mut Self, idx| {
+                            let size = match idx {
+                                0 => HoleSize::Off,
+                                1 => HoleSize::Small,
+                                2 => HoleSize::Medium,
+                                _ => HoleSize::Large,
+                            };
+                            let _ = this.sender.send(TrayCommand::SetHoleSize(size));
+                        }),
+                        options: vec![
+                            RadioItem { label: "Off".to_string(), ..Default::default() },
+                            RadioItem { label: "Small".to_string(), ..Default::default() },
+                            RadioItem { label: "Medium".to_string(), ..Default::default() },
+                            RadioItem { label: "Large".to_string(), ..Default::default() },
+                        ],
+                    }
+                    .into(),
+                ],
+                ..Default::default()
+            }
+            .into(),
+            SubMenu {
+                label: "Presets".to_string(),
+                submenu: vec![
+                    StandardItem {
+                        label: "Warm Reading".to_string(),
+                        activate: Box::new(|this: &mut Self| {
+                            let _ = this.sender.send(TrayCommand::ApplyPreset(Preset::WarmReading));
+                        }),
+                        ..Default::default()
+                    }
+                    .into(),
+                    StandardItem {
+                        label: "Cool Daylight".to_string(),
+                        activate: Box::new(|this: &mut Self| {
+                            let _ = this.sender.send(TrayCommand::ApplyPreset(Preset::CoolDaylight));
+                        }),
+                        ..Default::default()
+                    }
+                    .into(),
+                    StandardItem {
+                        label: "Subtle".to_string(),
+                        activate: Box::new(|this: &mut Self| {
+                            let _ = this.sender.send(TrayCommand::ApplyPreset(Preset::Subtle));
+                        }),
+                        ..Default::default()
+                    }
+                    .into(),
+                    StandardItem {
+                        label: "Bright".to_string(),
+                        activate: Box::new(|this: &mut Self| {
+                            let _ = this.sender.send(TrayCommand::ApplyPreset(Preset::Bright));
+                        }),
+                        ..Default::default()
+                    }
+                    .into(),
+                ],
                 ..Default::default()
             }
             .into(),

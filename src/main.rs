@@ -8,7 +8,7 @@ mod settings;
 mod tray;
 
 use gtk::prelude::*;
-use settings::new_shared_state;
+use settings::{new_shared_state, GlowSize, Preset};
 use tray::TrayCommand;
 
 fn main() {
@@ -59,6 +59,36 @@ fn main() {
                     }
                     TrayCommand::Cooler => {
                         s.color_temp = (s.color_temp + 0.1).min(1.0);
+                    }
+                    TrayCommand::SetGlowSize(size) => {
+                        s.glow_size = size;
+                    }
+                    TrayCommand::SetHoleSize(size) => {
+                        s.hole_size = size;
+                    }
+                    TrayCommand::ApplyPreset(p) => {
+                        match p {
+                            Preset::WarmReading => {
+                                s.brightness = 0.5;
+                                s.color_temp = 0.1;
+                                s.glow_size = GlowSize::Small;
+                            }
+                            Preset::CoolDaylight => {
+                                s.brightness = 0.8;
+                                s.color_temp = 0.9;
+                                s.glow_size = GlowSize::Medium;
+                            }
+                            Preset::Subtle => {
+                                s.brightness = 0.3;
+                                s.color_temp = 0.5;
+                                s.glow_size = GlowSize::Small;
+                            }
+                            Preset::Bright => {
+                                s.brightness = 1.0;
+                                s.color_temp = 0.5;
+                                s.glow_size = GlowSize::Large;
+                            }
+                        }
                     }
                     TrayCommand::CameraStateChanged(active) => {
                         s.camera_active = active;
