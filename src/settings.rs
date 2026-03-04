@@ -7,6 +7,8 @@ pub struct RingLightState {
     pub color_temp: f32, // 0.0 = warm amber, 1.0 = cool white
     pub auto_mode: bool,     // auto-enable when camera is on
     pub camera_active: bool, // current camera state
+    pub mouse_x: f64,       // current mouse position
+    pub mouse_y: f64,
 }
 
 impl Default for RingLightState {
@@ -17,6 +19,8 @@ impl Default for RingLightState {
             color_temp: 0.5,
             auto_mode: true,
             camera_active: false,
+            mouse_x: -1000.0,
+            mouse_y: -1000.0,
         }
     }
 }

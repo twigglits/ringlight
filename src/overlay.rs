@@ -51,6 +51,28 @@ pub fn create_overlay(state: SharedState) -> gtk::Window {
     // Re-apply input shape after show
     set_click_through(&window);
 
+    // Poll mouse position every 50ms for smooth dimming near cursor
+    let state_mouse = state.clone();
+    let window_mouse = window.clone();
+    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+        if let Some(display) = gdk::Display::default() {
+            if let Some(seat) = display.default_seat() {
+                if let Some(pointer) = seat.pointer() {
+                    let (_screen, x, y) = pointer.position();
+                    let mut s = state_mouse.lock().unwrap();
+                    // Only redraw if mouse moved
+                    if (s.mouse_x - x as f64).abs() > 1.0 || (s.mouse_y - y as f64).abs() > 1.0 {
+                        s.mouse_x = x as f64;
+                        s.mouse_y = y as f64;
+                        drop(s);
+                        window_mouse.queue_draw();
+                    }
+                }
+            }
+        }
+        glib::ControlFlow::Continue
+    });
+
     window
 }
 
