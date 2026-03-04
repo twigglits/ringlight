@@ -55,7 +55,7 @@ pub fn create_overlay(state: SharedState) -> gtk::Window {
     // Re-apply input shape after show
     set_click_through(&window);
 
-    // Start raw mouse tracker (reads /dev/input/eventN directly — works on Wayland)
+    // Track mouse via raw input events (with X11 initial position sync)
     if let Some(mouse_pos) = mouse::start_mouse_tracker(mon_w as f64, mon_h as f64) {
         let state_mouse = state.clone();
         let window_mouse = window.clone();
@@ -71,7 +71,7 @@ pub fn create_overlay(state: SharedState) -> gtk::Window {
             glib::ControlFlow::Continue
         });
     } else {
-        eprintln!("ringlight: mouse tracking unavailable, dimming disabled");
+        eprintln!("ringlight: mouse tracking unavailable");
     }
 
     window

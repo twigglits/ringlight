@@ -1,9 +1,11 @@
 use std::fs::File;
 use std::io::Read;
 use std::mem;
+use std::os::raw::{c_int, c_uint, c_ulong};
 use std::sync::{Arc, Mutex};
 
-/// Linux input_event struct (from linux/input.h)
+// --- Raw input event tracking ---
+
 #[repr(C)]
 struct InputEvent {
     _tv_sec: isize,
@@ -19,14 +21,11 @@ const REL_Y: u16 = 0x01;
 
 pub type SharedMousePos = Arc<Mutex<(f64, f64)>>;
 
-/// Find the mouse event device by checking /proc/bus/input/devices
 fn find_mouse_event_device() -> Option<String> {
     let devices = std::fs::read_to_string("/proc/bus/input/devices").ok()?;
-    // Look for a section containing "mouse" in handlers line
     for section in devices.split("\n\n") {
         let handlers_line = section.lines().find(|l| l.starts_with("H: Handlers="))?;
         if handlers_line.contains("mouse") {
-            // Extract eventN from the handlers line
             for part in handlers_line.split_whitespace() {
                 if part.starts_with("event") {
                     return Some(format!("/dev/input/{}", part));
@@ -37,8 +36,52 @@ fn find_mouse_event_device() -> Option<String> {
     None
 }
 
+// --- X11 pointer query (for initial position via XWayland) ---
+
+type XDisplay = *mut std::ffi::c_void;
+type XWindow = c_ulong;
+
+#[link(name = "X11")]
+extern "C" {
+    fn XOpenDisplay(display_name: *const i8) -> XDisplay;
+    fn XCloseDisplay(display: XDisplay) -> c_int;
+    fn XDefaultRootWindow(display: XDisplay) -> XWindow;
+    fn XQueryPointer(
+        display: XDisplay,
+        w: XWindow,
+        root_return: *mut XWindow,
+        child_return: *mut XWindow,
+        root_x_return: *mut c_int,
+        root_y_return: *mut c_int,
+        win_x_return: *mut c_int,
+        win_y_return: *mut c_int,
+        mask_return: *mut c_uint,
+    ) -> c_int;
+}
+
+/// Query the current cursor position via X11/XWayland (one-shot).
+fn x11_cursor_position() -> Option<(f64, f64)> {
+    unsafe {
+        let display = XOpenDisplay(std::ptr::null());
+        if display.is_null() {
+            return None;
+        }
+        let root = XDefaultRootWindow(display);
+        let (mut root_ret, mut child_ret) = (0 as XWindow, 0 as XWindow);
+        let (mut rx, mut ry, mut wx, mut wy) = (0 as c_int, 0, 0, 0);
+        let mut mask: c_uint = 0;
+        XQueryPointer(
+            display, root,
+            &mut root_ret, &mut child_ret,
+            &mut rx, &mut ry, &mut wx, &mut wy, &mut mask,
+        );
+        XCloseDisplay(display);
+        Some((rx as f64, ry as f64))
+    }
+}
+
 /// Start a background thread that reads raw mouse events from /dev/input/eventN.
-/// Returns a shared mouse position that gets updated with each movement.
+/// Uses X11/XWayland for initial position, then tracks relative deltas.
 pub fn start_mouse_tracker(screen_width: f64, screen_height: f64) -> Option<SharedMousePos> {
     let device = find_mouse_event_device().or_else(|| {
         eprintln!("ringlight: could not find mouse event device, trying /dev/input/event3");
@@ -53,10 +96,11 @@ pub fn start_mouse_tracker(screen_width: f64, screen_height: f64) -> Option<Shar
         }
     };
 
-    eprintln!("ringlight: tracking mouse via {} (screen {}x{})", device, screen_width, screen_height);
+    // Try to get initial cursor position from X11/XWayland
+    let initial = x11_cursor_position().unwrap_or((screen_width / 2.0, screen_height / 2.0));
+    eprintln!("ringlight: tracking mouse via {} (initial pos: {:.0},{:.0})", device, initial.0, initial.1);
 
-    // Start at center of screen
-    let pos: SharedMousePos = Arc::new(Mutex::new((screen_width / 2.0, screen_height / 2.0)));
+    let pos: SharedMousePos = Arc::new(Mutex::new(initial));
     let pos_thread = pos.clone();
 
     std::thread::spawn(move || {
