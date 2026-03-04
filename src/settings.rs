@@ -5,14 +5,18 @@ pub struct RingLightState {
     pub enabled: bool,
     pub brightness: f32,
     pub color_temp: f32, // 0.0 = warm amber, 1.0 = cool white
+    pub auto_mode: bool,     // auto-enable when camera is on
+    pub camera_active: bool, // current camera state
 }
 
 impl Default for RingLightState {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             brightness: 0.7,
             color_temp: 0.5,
+            auto_mode: true,
+            camera_active: false,
         }
     }
 }

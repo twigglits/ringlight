@@ -1,3 +1,4 @@
+mod camera;
 mod layer_shell;
 mod overlay;
 mod renderer;
@@ -21,8 +22,11 @@ fn main() {
         let window = overlay::create_overlay(state.clone());
         app.add_window(&window);
 
-        // Start system tray and listen for commands
-        let receiver = tray::start_tray(state.clone());
+        // Start system tray and get channel for commands
+        let (receiver, camera_sender) = tray::start_tray(state.clone());
+
+        // Start camera monitor (sends CameraStateChanged via the same channel)
+        camera::start_camera_monitor(camera_sender);
 
         let state_cmd = state.clone();
         let window_cmd = window.clone();
@@ -30,7 +34,16 @@ fn main() {
             {
                 let mut s = state_cmd.lock().unwrap();
                 match cmd {
-                    TrayCommand::Toggle => s.enabled = !s.enabled,
+                    TrayCommand::Toggle => {
+                        s.enabled = !s.enabled;
+                    }
+                    TrayCommand::ToggleAutoMode => {
+                        s.auto_mode = !s.auto_mode;
+                        // If turning auto on, sync with current camera state
+                        if s.auto_mode {
+                            s.enabled = s.camera_active;
+                        }
+                    }
                     TrayCommand::BrightnessUp => {
                         s.brightness = (s.brightness + 0.1).min(1.0);
                     }
@@ -42,6 +55,12 @@ fn main() {
                     }
                     TrayCommand::Cooler => {
                         s.color_temp = (s.color_temp + 0.1).min(1.0);
+                    }
+                    TrayCommand::CameraStateChanged(active) => {
+                        s.camera_active = active;
+                        if s.auto_mode {
+                            s.enabled = active;
+                        }
                     }
                     TrayCommand::Quit => {
                         gtk::main_quit();
