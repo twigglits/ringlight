@@ -1,21 +1,26 @@
 [package]
 name = "ringlight"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "Desktop ring light overlay for Ubuntu (Wayland/GNOME)"
+description = "Desktop ring light overlay for Pop!_OS (COSMIC Desktop)"
 license = "GPL-3.0"
 authors = ["Jean Naude"]
 repository = "https://github.com/twigglits/ringlight"
-keywords = ["ringlight", "webcam", "overlay", "gnome", "wayland"]
+keywords = ["ringlight", "webcam", "overlay", "cosmic", "wayland"]
 categories = ["gui"]
 
 [dependencies]
-gtk = { version = "0.18", features = ["v3_24"] }
-gdk = "0.18"
-cairo-rs = "0.18"
-gio = "0.18"
-glib = "0.18"
-ksni = "0.2"
+log = "0.4"
+env_logger = "0.11"
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync"] }
+futures-util = "0.3"
 
-[build-dependencies]
-pkg-config = "0.3"
+[dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic.git"
+default-features = false
+features = [
+    "applet",
+    "tokio",
+    "wgpu",
+]

@@ -1,17 +1,14 @@
-use crate::tray::TrayCommand;
 use std::fs;
 use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio::time;
 
-/// Detect video devices present on the system
+/// Detect video devices present on the system.
 fn detect_video_devices() -> Vec<String> {
-    let mut devices = Vec::new();
-    for i in 0..10 {
-        let path = format!("/dev/video{}", i);
-        if std::path::Path::new(&path).exists() {
-            devices.push(path);
-        }
-    }
-    devices
+    (0..10)
+        .map(|i| format!("/dev/video{}", i))
+        .filter(|p| std::path::Path::new(p).exists())
+        .collect()
 }
 
 /// Check if any process has a video device open by scanning /proc/*/fd/ symlinks.
@@ -20,33 +17,28 @@ fn is_camera_in_use(devices: &[String]) -> bool {
         return false;
     }
 
-    let proc_entries = match fs::read_dir("/proc") {
-        Ok(entries) => entries,
-        Err(_) => return false,
+    let Ok(proc_entries) = fs::read_dir("/proc") else {
+        return false;
     };
 
     for entry in proc_entries.flatten() {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
-        // Only look at numeric (PID) directories
         if !name_str.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
 
         let fd_dir = entry.path().join("fd");
-        let fd_entries = match fs::read_dir(&fd_dir) {
-            Ok(entries) => entries,
-            Err(_) => continue, // permission denied or process exited
+        let Ok(fds) = fs::read_dir(&fd_dir) else {
+            continue;
         };
 
-        for fd_entry in fd_entries.flatten() {
-            let link_target = match fs::read_link(fd_entry.path()) {
-                Ok(target) => target,
-                Err(_) => continue,
-            };
-            let target_str = link_target.to_string_lossy().into_owned();
-            if devices.iter().any(|dev| target_str == *dev) {
-                return true;
+        for fd in fds.flatten() {
+            if let Ok(target) = fs::read_link(fd.path()) {
+                let target_str = target.to_string_lossy();
+                if devices.iter().any(|dev| *dev == *target_str) {
+                    return true;
+                }
             }
         }
     }
@@ -54,31 +46,33 @@ fn is_camera_in_use(devices: &[String]) -> bool {
     false
 }
 
-/// Start a background thread that polls camera usage every 2 seconds.
-/// Sends `TrayCommand::CameraStateChanged(bool)` on the glib channel when state changes.
-pub fn start_camera_monitor(sender: glib::Sender<TrayCommand>) {
-    std::thread::spawn(move || {
-        let devices = detect_video_devices();
-        if devices.is_empty() {
-            eprintln!("ringlight: no /dev/video* devices found, camera monitor disabled");
-            return;
-        }
-        eprintln!("ringlight: monitoring camera devices: {:?}", devices);
+/// Async camera monitor that sends `true`/`false` on state changes.
+/// Polls every 2 seconds.
+pub async fn monitor_camera(tx: mpsc::Sender<bool>) {
+    let devices = detect_video_devices();
+    if devices.is_empty() {
+        log::warn!("No /dev/video* devices found, camera monitor disabled");
+        // Keep the future alive so the subscription doesn't restart
+        std::future::pending::<()>().await;
+        return;
+    }
+    log::info!("Monitoring camera devices: {:?}", devices);
 
-        let mut was_active = false;
+    let mut was_active = false;
+    let mut interval = time::interval(Duration::from_secs(2));
 
-        loop {
-            let active = is_camera_in_use(&devices);
-
-            if active != was_active {
-                eprintln!("ringlight: camera {} active", if active { "became" } else { "no longer" });
-                if sender.send(TrayCommand::CameraStateChanged(active)).is_err() {
-                    break; // receiver dropped, app shutting down
-                }
-                was_active = active;
+    loop {
+        interval.tick().await;
+        let active = is_camera_in_use(&devices);
+        if active != was_active {
+            log::info!(
+                "Camera {} active",
+                if active { "became" } else { "no longer" }
+            );
+            if tx.send(active).await.is_err() {
+                break;
             }
-
-            std::thread::sleep(Duration::from_secs(2));
+            was_active = active;
         }
-    });
+    }
 }
