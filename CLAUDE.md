@@ -32,10 +32,25 @@ src/
 ## Build
 
 ```bash
+# System deps (Pop!_OS / Ubuntu)
+sudo apt install -y build-essential cmake libexpat1-dev libfontconfig-dev \
+  libfreetype-dev libxkbcommon-dev libwayland-dev libdbus-1-dev \
+  libssl-dev libgbm-dev libpipewire-0.3-dev libpulse-dev pkgconf
+
+# Build
 cargo build --release
 ```
 
-Requires a working Wayland dev environment. libcosmic is pulled from `https://github.com/pop-os/libcosmic.git`.
+Requires Rust stable (1.94+). libcosmic is pulled from `https://github.com/pop-os/libcosmic.git`. First build downloads ~649 crates and takes several minutes.
+
+## Install as COSMIC panel applet
+
+```bash
+sudo cp target/release/ringlight /usr/local/bin/
+sudo cp ringlight.desktop /usr/share/applications/
+```
+
+Then add via **COSMIC Settings → Desktop → Panel → Applets**.
 
 ## Key design decisions
 
@@ -44,6 +59,34 @@ Requires a working Wayland dev environment. libcosmic is pulled from `https://gi
 - **No persistent settings yet**: Settings are in-memory only. cosmic-config integration can be added later
 - **`gnome-extension/` retained**: For reference; not used by the COSMIC build
 
-## API notes
+## Verified libcosmic import paths (as of 2026-03-17)
 
-The layer-surface creation in `app.rs` uses `cosmic::iced_sctk::commands::layer_surface`. These import paths can shift between libcosmic releases — check the iced-sctk re-exports if compilation fails. The `Anchor` type uses wlr-layer-shell bitflags (TOP=1, BOTTOM=2, LEFT=4, RIGHT=8).
+These were validated against the actual pop-os/iced fork and compile cleanly:
+
+```rust
+// Layer-surface commands and types
+use cosmic::iced::platform_specific::shell::commands::layer_surface::{
+    destroy_layer_surface, get_layer_surface, Anchor, KeyboardInteractivity, Layer,
+};
+use cosmic::iced::platform_specific::runtime::wayland::layer_surface::SctkLayerSurfaceSettings;
+
+// Popup commands
+use cosmic::iced::platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup};
+
+// Canvas widget (Theme must be cosmic::Theme for COSMIC apps)
+use cosmic::iced::widget::canvas::{self, Canvas, Cache, Frame, Geometry};
+// impl canvas::Program<Message, cosmic::Theme> for MyProgram { ... }
+
+// Application trait uses Task (not Command)
+use cosmic::app::{Core, Task};
+
+// Subscriptions: Subscription::run(|| stream) or Subscription::run_with(id, |&id| stream)
+```
+
+The iced fork used by libcosmic renamed `Command` → `Task`. The `Subscription::run` API takes an `fn() -> Stream` (no captures). Use `Subscription::run_with(hashable_id, |&id| stream)` when you need to pass state.
+
+## Status
+
+- Project compiles cleanly (zero errors, zero warnings) as of 2026-03-17
+- Not yet runtime-tested on a live COSMIC desktop session
+- Future work: cosmic-config persistence, runtime testing, potential shader-based rendering for smoother gradients
