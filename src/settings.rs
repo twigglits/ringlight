@@ -51,22 +51,83 @@ impl RingLightSettings {
         ]
     }
 
-    /// Glow width in pixels from screen edge inward.
-    pub fn glow_width(&self) -> f32 {
+    /// Glow depth as a fraction of the smaller screen dimension.
+    ///
+    /// Proportional rather than a fixed pixel count, so the glow looks the
+    /// same on any display. The old fixed 180px was 18% of a 1000px logical
+    /// height, which is why it read as far too thick.
+    pub fn glow_fraction(&self) -> f32 {
         match self.glow_size {
-            GlowSize::Small => 90.0,
-            GlowSize::Medium => 180.0,
-            GlowSize::Large => 300.0,
+            GlowSize::Small => 0.06,
+            GlowSize::Medium => 0.10,
+            GlowSize::Large => 0.16,
         }
     }
 
-    /// Cursor hole radius in pixels.
-    pub fn hole_radius(&self) -> f32 {
+    /// Cursor hole radius as a fraction of the smaller screen dimension.
+    pub fn hole_fraction(&self) -> f32 {
         match self.hole_size {
             HoleSize::Off => 0.0,
-            HoleSize::Small => 120.0,
-            HoleSize::Medium => 250.0,
-            HoleSize::Large => 400.0,
+            HoleSize::Small => 0.08,
+            HoleSize::Medium => 0.14,
+            HoleSize::Large => 0.22,
         }
+    }
+}
+
+/// Convert a fraction of the smaller screen dimension into pixels.
+///
+/// `resolution` must be in physical pixels, so the result is too.
+pub fn scale_to_min_dimension(fraction: f32, resolution: [f32; 2]) -> f32 {
+    fraction * resolution[0].min(resolution[1])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn glow_fractions_are_ordered_and_sane() {
+        let small = RingLightSettings { glow_size: GlowSize::Small, ..Default::default() };
+        let medium = RingLightSettings { glow_size: GlowSize::Medium, ..Default::default() };
+        let large = RingLightSettings { glow_size: GlowSize::Large, ..Default::default() };
+
+        assert!(small.glow_fraction() < medium.glow_fraction());
+        assert!(medium.glow_fraction() < large.glow_fraction());
+        // A glow wider than a quarter of the screen stops being a glow.
+        assert!(large.glow_fraction() < 0.25);
+        assert!(small.glow_fraction() > 0.0);
+    }
+
+    #[test]
+    fn hole_off_is_zero() {
+        let off = RingLightSettings { hole_size: HoleSize::Off, ..Default::default() };
+        assert_eq!(off.hole_fraction(), 0.0);
+    }
+
+    #[test]
+    fn scaling_uses_the_smaller_dimension() {
+        // Landscape: height is smaller, so it governs.
+        assert_eq!(scale_to_min_dimension(0.10, [3000.0, 2000.0]), 200.0);
+        // Portrait: width governs.
+        assert_eq!(scale_to_min_dimension(0.10, [2000.0, 3000.0]), 200.0);
+        // Square.
+        assert_eq!(scale_to_min_dimension(0.5, [1000.0, 1000.0]), 500.0);
+    }
+
+    #[test]
+    fn medium_glow_matches_the_spec_table() {
+        let s = RingLightSettings { glow_size: GlowSize::Medium, ..Default::default() };
+        // 3000x2000 physical at 200% => 200 physical px => 100 logical px.
+        assert_eq!(scale_to_min_dimension(s.glow_fraction(), [3000.0, 2000.0]), 200.0);
+    }
+
+    #[test]
+    fn glow_color_endpoints_are_warm_and_cool() {
+        let warm = RingLightSettings { color_temp: 0.0, ..Default::default() };
+        let cool = RingLightSettings { color_temp: 1.0, ..Default::default() };
+        // Warm has more red than blue; cool has more blue than warm.
+        assert!(warm.glow_color()[0] > warm.glow_color()[2]);
+        assert!(cool.glow_color()[2] > warm.glow_color()[2]);
     }
 }

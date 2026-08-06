@@ -5,6 +5,7 @@
 //! conversion happens in `Primitive::prepare`, which is the only place the
 //! viewport scale factor is available.
 
+use crate::settings::scale_to_min_dimension;
 use cosmic::iced::{mouse, Rectangle};
 use cosmic::iced_wgpu::wgpu;
 use cosmic::iced_widget::shader::{self, Viewport};
@@ -135,15 +136,14 @@ impl shader::Primitive for GlowPrimitive {
         // bounds is logical; everything below is physical.
         let scale = viewport.scale_factor() as f32;
         let resolution = [bounds.width * scale, bounds.height * scale];
-        let min_dim = resolution[0].min(resolution[1]);
 
         let uniforms = Uniforms {
             resolution,
             cursor: self.cursor,
             color: self.color,
             brightness: self.brightness,
-            glow_width: self.glow_fraction * min_dim,
-            hole_radius: self.hole_fraction * min_dim,
+            glow_width: scale_to_min_dimension(self.glow_fraction, resolution),
+            hole_radius: scale_to_min_dimension(self.hole_fraction, resolution),
             hole_softness: self.hole_softness,
             _pad: 0.0,
         };
