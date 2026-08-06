@@ -25,7 +25,7 @@ src/
 └── settings.rs   RingLightSettings struct (brightness, color_temp, glow/hole sizes)
 ```
 
-**Overlay approach**: Four separate layer-shell surfaces (top, bottom, left, right) rather than one full-screen surface. This avoids click-through issues — only the glow edges block pointer input while the center of the screen remains fully interactive.
+**Overlay approach**: Four separate layer-shell surfaces (top, bottom, left, right) rather than one full-screen surface. Each surface is created with `input_zone: Some(Vec::new())` — an empty Wayland input region — so it is fully click-through; the glow renders but never captures pointer input. The four-edge split is purely a rendering choice (no surface over the screen center).
 
 **Glow rendering**: Multi-pass (5 passes) strip-based gradient with quadratic alpha falloff. Cursor hole uses circle-strip intersection to split strips around the mouse position.
 

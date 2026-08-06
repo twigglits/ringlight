@@ -325,10 +325,17 @@ impl RingLight {
                 id,
                 keyboard_interactivity: KeyboardInteractivity::None,
                 namespace: format!("ringlight-edge-{}", i),
-                layer: Layer::Overlay,
+                // Layer::Top (not Overlay): cosmic-comp appears to force input-grab
+                // on Overlay-layer surfaces, ignoring the empty input_zone below.
+                layer: Layer::Top,
                 size: Some(size),
                 anchor,
                 exclusive_zone: 0,
+                // Empty input zone => empty wl_region => the surface accepts no
+                // pointer input, so clicks in the glow strip pass through to the
+                // window beneath. Without this the strip grabs every click that
+                // lands on it (input_zone: None means "accept all input").
+                input_zone: Some(Vec::new()),
                 ..Default::default()
             }));
         }
