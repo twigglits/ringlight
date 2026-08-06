@@ -4033,6 +4033,8 @@ dependencies = [
  "log",
  "serde",
  "tokio",
+ "wayland-client",
+ "wayland-protocols",
 ]
 
 [[package]]
