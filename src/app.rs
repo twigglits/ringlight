@@ -276,8 +276,8 @@ impl RingLight {
         Shader::new(GlowProgram {
             color: self.settings.glow_color(),
             brightness: self.settings.brightness,
-            glow_fraction: 0.10,
-            hole_fraction: 0.0,
+            glow_fraction: self.settings.glow_fraction(),
+            hole_fraction: 0.0, // Task 6 wires up the cursor hole
             cursor: [0.5, 0.5],
         })
         .width(Length::Fill)
