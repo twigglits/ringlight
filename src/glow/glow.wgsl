@@ -37,6 +37,13 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     var a = pow(max(0.0, 1.0 - t), 2.0);
     a = a * u.brightness;
 
+    // Soft circular cutout so the glow does not wash out whatever the cursor
+    // is pointing at. hole_radius of 0 disables it entirely.
+    if (u.hole_radius > 0.0) {
+        let dist = distance(p, u.cursor * size);
+        a = a * smoothstep(u.hole_radius * u.hole_softness, u.hole_radius, dist);
+    }
+
     if (a <= 0.0) {
         discard;
     }

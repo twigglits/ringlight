@@ -1254,7 +1254,11 @@ Expected: PASS, 9 tests.
 Run: `cargo build --release 2>&1 | tail -20`
 Expected: clean.
 
-- [ ] **Step 9: Verify tracking is live**
+- [ ] **Step 9: Verify tracking is live** *(deferred to Task 6)*
+
+**Plan defect, found during execution:** nothing calls `cursor::start()` until
+Task 6 wires the subscription, so the thread never runs and this check cannot
+pass here. Confirm the build and unit tests only; do the log check in Task 6.
 
 ```bash
 sudo cp target/release/ringlight /usr/local/bin/ && pkill -x cosmic-panel

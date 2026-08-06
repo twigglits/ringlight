@@ -16,6 +16,7 @@ use cosmic::iced::window::Id;
 use cosmic::iced::{Alignment, Length, Limits, Subscription};
 use cosmic::widget;
 use cosmic::{Application, Element};
+use std::time::{Duration, Instant};
 
 // Layer-surface commands and types.
 // Verified paths for the pop-os/iced fork used by libcosmic:
@@ -32,6 +33,7 @@ pub struct RingLight {
     settings: RingLightSettings,
     camera_active: bool,
     overlay_id: Option<Id>,
+    cursor: crate::cursor::CursorState,
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +46,7 @@ pub enum Message {
     SetGlowSize(GlowSize),
     SetHoleSize(HoleSize),
     CameraStateChanged(bool),
+    CursorMoved(crate::cursor::CursorState),
     ApplyPreset(&'static str),
     Quit,
 }
@@ -62,6 +65,7 @@ impl Application for RingLight {
             settings: RingLightSettings::default(),
             camera_active: false,
             overlay_id: None,
+            cursor: crate::cursor::CursorState::default(),
         };
         (app, Task::none())
     }
@@ -159,6 +163,10 @@ impl Application for RingLight {
                 }
             }
 
+            Message::CursorMoved(c) => {
+                self.cursor = c;
+            }
+
             Message::ApplyPreset(name) => {
                 match name {
                     "warm" => {
@@ -206,7 +214,41 @@ impl Application for RingLight {
             .flatten_stream()
         });
 
-        camera_sub
+        // The watch channel coalesces, and this throttles further: at most one
+        // message per frame, and nothing at all for sub-pixel movement. The
+        // old code emitted one message per raw input event and repainted four
+        // surfaces for each.
+        let cursor_sub = Subscription::run(|| {
+            async {
+                let rx = crate::cursor::start();
+                let init = *rx.borrow();
+                futures_util::stream::unfold(
+                    (rx, Instant::now(), init),
+                    |(mut rx, mut last_emit, mut last)| async move {
+                        loop {
+                            rx.changed().await.ok()?;
+                            let now = *rx.borrow();
+
+                            let moved = (now.pos[0] - last.pos[0]).abs()
+                                + (now.pos[1] - last.pos[1]).abs()
+                                > 0.0005; // ~1.5px on a 3000px-wide output
+                            let toggled = now.visible != last.visible;
+
+                            if toggled
+                                || (moved && last_emit.elapsed() >= Duration::from_millis(16))
+                            {
+                                last_emit = Instant::now();
+                                last = now;
+                                return Some((Message::CursorMoved(now), (rx, last_emit, last)));
+                            }
+                        }
+                    },
+                )
+            }
+            .flatten_stream()
+        });
+
+        Subscription::batch(vec![camera_sub, cursor_sub])
     }
 }
 
@@ -277,8 +319,12 @@ impl RingLight {
             color: self.settings.glow_color(),
             brightness: self.settings.brightness,
             glow_fraction: self.settings.glow_fraction(),
-            hole_fraction: 0.0, // Task 6 wires up the cursor hole
-            cursor: [0.5, 0.5],
+            hole_fraction: if self.cursor.visible {
+                self.settings.hole_fraction()
+            } else {
+                0.0
+            },
+            cursor: self.cursor.pos,
         })
         .width(Length::Fill)
         .height(Length::Fill)
