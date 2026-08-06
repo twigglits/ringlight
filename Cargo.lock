@@ -4027,11 +4027,13 @@ name = "ringlight"
 version = "0.2.0"
 dependencies = [
  "bytemuck",
+ "dirs",
  "env_logger",
  "futures-util",
  "libcosmic",
  "log",
  "serde",
+ "serde_json",
  "tokio",
  "wayland-client",
  "wayland-protocols",

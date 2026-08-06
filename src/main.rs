@@ -1,5 +1,6 @@
 mod app;
 mod camera;
+mod config;
 mod cursor;
 mod glow;
 mod settings;

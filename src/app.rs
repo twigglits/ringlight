@@ -48,6 +48,7 @@ pub enum Message {
     CameraStateChanged(bool),
     CursorMoved(crate::cursor::CursorState),
     ApplyPreset(&'static str),
+    PersistSettings,
     Quit,
 }
 
@@ -62,7 +63,7 @@ impl Application for RingLight {
         let app = Self {
             core,
             popup: None,
-            settings: RingLightSettings::default(),
+            settings: crate::config::load(),
             camera_active: false,
             overlay_id: None,
             cursor: crate::cursor::CursorState::default(),
@@ -132,6 +133,7 @@ impl Application for RingLight {
 
             Message::ToggleEnabled(on) => {
                 self.settings.enabled = on;
+                crate::config::save(&self.settings);
                 return self.sync_overlay();
             }
             Message::ToggleAutoMode(on) => {
@@ -139,6 +141,7 @@ impl Application for RingLight {
                 if on {
                     self.settings.enabled = self.camera_active;
                 }
+                crate::config::save(&self.settings);
                 return self.sync_overlay();
             }
 
@@ -150,9 +153,11 @@ impl Application for RingLight {
             }
             Message::SetGlowSize(s) => {
                 self.settings.glow_size = s;
+                crate::config::save(&self.settings);
             }
             Message::SetHoleSize(s) => {
                 self.settings.hole_size = s;
+                crate::config::save(&self.settings);
             }
 
             Message::CameraStateChanged(active) => {
@@ -191,6 +196,11 @@ impl Application for RingLight {
                     }
                     _ => {}
                 }
+                crate::config::save(&self.settings);
+            }
+
+            Message::PersistSettings => {
+                crate::config::save(&self.settings);
             }
 
             Message::Quit => {
@@ -373,7 +383,8 @@ impl RingLight {
             )))
             .push(
                 widget::slider(0.0..=1.0, self.settings.brightness, Message::SetBrightness)
-                    .step(0.05),
+                    .step(0.05)
+                    .on_release(Message::PersistSettings),
             )
             // Color temperature
             .push(widget::text::body(format!(
@@ -386,7 +397,8 @@ impl RingLight {
             )))
             .push(
                 widget::slider(0.0..=1.0, self.settings.color_temp, Message::SetColorTemp)
-                    .step(0.05),
+                    .step(0.05)
+                    .on_release(Message::PersistSettings),
             )
             .push(widget::divider::horizontal::default())
             // Glow size

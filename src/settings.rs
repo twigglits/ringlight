@@ -1,3 +1,7 @@
+// The CosmicConfigEntry derive emits unqualified `cosmic_config::` paths and a
+// bare `CosmicConfigEntry`, so both must be in scope here for it to expand.
+use cosmic::cosmic_config;
+use cosmic::cosmic_config::CosmicConfigEntry;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -15,7 +19,15 @@ pub enum HoleSize {
     Large,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    cosmic_config::cosmic_config_derive::CosmicConfigEntry,
+)]
+#[version = 1]
 pub struct RingLightSettings {
     pub enabled: bool,
     pub brightness: f32,
