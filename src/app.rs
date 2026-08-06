@@ -49,7 +49,6 @@ pub enum Message {
     CursorMoved(crate::cursor::CursorState),
     ApplyPreset(&'static str),
     PersistSettings,
-    Quit,
 }
 
 impl Application for RingLight {
@@ -203,9 +202,6 @@ impl Application for RingLight {
                 crate::config::save(&self.settings);
             }
 
-            Message::Quit => {
-                std::process::exit(0);
-            }
         }
         Task::none()
     }
@@ -430,9 +426,7 @@ impl RingLight {
                     .push(widget::button::text("Cool").on_press(Message::ApplyPreset("cool")))
                     .push(widget::button::text("Subtle").on_press(Message::ApplyPreset("subtle")))
                     .push(widget::button::text("Bright").on_press(Message::ApplyPreset("bright"))),
-            )
-            .push(widget::divider::horizontal::default())
-            .push(widget::button::text("Quit").on_press(Message::Quit));
+            );
 
         self.core.applet.popup_container(content).into()
     }

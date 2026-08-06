@@ -47,21 +47,27 @@ Ringlight appears as an icon in the COSMIC panel. Click it to open the controls 
 - **Brightness** — adjust glow intensity (slider)
 - **Color temperature** — warmer (amber) ↔ cooler (white) (slider)
 - **Glow Size** — Small / Medium / Large
-- **Cursor Hole** — Off / Small / Medium / Large (dims glow near the cursor)
+- **Cursor Hole** — Off / Small / Medium / Large (opens a soft gap in the glow at the cursor)
 - **Presets** — Warm, Cool, Subtle, Bright
-- **Quit** — exit the applet
+
+Settings persist across restarts via cosmic-config. To stop the applet, remove it from the panel in COSMIC Settings.
 
 ## How it works
 
-- **Overlay rendering**: Four transparent Wayland layer-shell surfaces are created on the Overlay layer, one per screen edge. Each surface renders its portion of the glow using an iced Canvas widget with strip-based gradient rendering and a multi-pass approach for brightness.
+- **Overlay rendering**: One transparent Wayland layer-shell surface anchored to all four screen edges. A WGSL fragment shader computes alpha from the distance to the *nearest* edge, so corners are handled without a special case and no seams exist. Peak opacity is capped below fully opaque, so the glow always reads as light rather than paint — content underneath stays readable even at maximum brightness.
+- **Click-through**: The surface is created with an empty Wayland input region, so it accepts no pointer input at all and every click passes through to whatever is underneath.
 - **Camera detection**: Scans `/proc/*/fd/` every 2 seconds to detect processes that have opened `/dev/video*` devices. No extra packages needed.
-- **Cursor tracking**: Reads raw input events from `/dev/input/eventN` to track mouse position. Requires read access to the input device — add yourself to the `input` group if needed:
+- **Cursor tracking**: Uses the compositor's own cursor position via the `ext-image-copy-capture-v1` pointer cursor session. **No permissions are required** — no `input` group membership, no portal prompt, no D-Bus extension — and no frames are ever captured; only position events are read. Because the coordinates come from the compositor, they are exact rather than drifting the way accumulated raw input deltas do.
 
-```bash
-sudo usermod -aG input $USER
-```
+  This needs a compositor implementing `ext-image-copy-capture-v1`; cosmic-comp does. To check on your machine:
 
-Then log out and back in.
+  ```bash
+  cargo run --release --example cursor_probe
+  ```
+
+  If the protocol is unavailable, Ringlight logs a warning once and runs normally without the cursor hole.
+
+- **Glow size**: Expressed as a fraction of the smaller screen dimension rather than a fixed pixel count, so it looks the same on any display or scale factor.
 
 ## Architecture (COSMIC port)
 
@@ -71,9 +77,10 @@ The original GNOME/GTK3 version used cairo rendering, a ksni system tray, libgtk
 |-----------|--------------|----------------|
 | GUI toolkit | GTK3 + cairo | libcosmic (iced) |
 | Panel integration | ksni system tray | COSMIC panel applet |
-| Overlay surface | libgtk-layer-shell FFI | iced-sctk layer-shell |
-| Glow rendering | cairo gradients + DestOut | iced Canvas strips |
-| Cursor tracking | D-Bus GNOME extension / `/dev/input` fallback | `/dev/input` only |
+| Overlay surface | libgtk-layer-shell FFI | iced-sctk layer-shell (one surface) |
+| Glow rendering | cairo gradients + DestOut | WGSL fragment shader over wgpu |
+| Cursor tracking | D-Bus GNOME extension / `/dev/input` | `ext-image-copy-capture-v1` (no permissions) |
+| Settings | in-memory | cosmic-config |
 | Async runtime | glib main loop + threads | tokio + iced subscriptions |
 
 The bundled `gnome-extension/` directory is retained for reference but is not used by the COSMIC build.
