@@ -1,7 +1,5 @@
 mod app;
 mod camera;
-mod mouse;
-mod overlay;
 mod settings;
 
 fn main() -> cosmic::iced::Result {

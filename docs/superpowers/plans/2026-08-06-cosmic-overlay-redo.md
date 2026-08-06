@@ -30,10 +30,30 @@ Reinstall-and-restart after any change that needs visual checking:
 ```bash
 cargo build --release \
   && sudo cp target/release/ringlight /usr/local/bin/ \
-  && pkill -x ringlight
+  && pkill -x cosmic-panel
 ```
 
-cosmic-panel respawns the applet automatically. To read its logs, run it with logging enabled after killing the panel-spawned copy:
+**Restart the panel, not the applet.** cosmic-panel logs an applet's exit
+(`ringlight: exited with code 137`) but does **not** respawn it. `cosmic-session`
+does supervise cosmic-panel, so killing the panel brings it and every applet back.
+
+**Verifying the overlay without clicking.** The glow auto-enables while a camera
+is in use, so it can be triggered headlessly:
+
+```bash
+sleep 25 < /dev/video0 &        # hold the device open; auto-mode turns the glow on
+sleep 5                          # the camera monitor polls every 2s
+cosmic-screenshot --interactive=false --notify=false -s ./shots
+```
+
+Then sample pixels to confirm compositing exactly, rather than eyeballing it
+(this machine has ImageMagick 6, so `convert`, not `magick`):
+
+```bash
+convert shot.png -format "%[pixel:p{1500,3}]" info:   # y=3 is behind the panel
+```
+
+To read logs, run the binary with logging enabled after killing the panel-spawned copy:
 
 ```bash
 RUST_LOG=ringlight=debug,iced_renderer=warn journalctl --user -f -t ringlight
@@ -234,7 +254,7 @@ Expected: compiles with zero errors and zero warnings.
 - [ ] **Step 9: Install and verify on the live session**
 
 ```bash
-sudo cp target/release/ringlight /usr/local/bin/ && pkill -x ringlight
+sudo cp target/release/ringlight /usr/local/bin/ && pkill -x cosmic-panel
 ```
 
 Click the panel icon, toggle **Enabled** on, and confirm all four:
@@ -560,7 +580,7 @@ If it fails because `cosmic::iced_widget::shader` does not exist, the `wgpu` fea
 - [ ] **Step 6: Install and verify the GPU path is live**
 
 ```bash
-sudo cp target/release/ringlight /usr/local/bin/ && pkill -x ringlight
+sudo cp target/release/ringlight /usr/local/bin/ && pkill -x cosmic-panel
 ```
 
 Toggle on. Expected: a flat translucent warm wash, visually the same as Task 1 but now drawn by the GPU.
@@ -825,7 +845,7 @@ Expected: clean.
 - [ ] **Step 4: Install and verify the glow visually**
 
 ```bash
-sudo cp target/release/ringlight /usr/local/bin/ && pkill -x ringlight
+sudo cp target/release/ringlight /usr/local/bin/ && pkill -x cosmic-panel
 ```
 
 Toggle on and check all six:
@@ -1237,7 +1257,7 @@ Expected: clean.
 - [ ] **Step 9: Verify tracking is live**
 
 ```bash
-sudo cp target/release/ringlight /usr/local/bin/ && pkill -x ringlight
+sudo cp target/release/ringlight /usr/local/bin/ && pkill -x cosmic-panel
 sleep 2
 journalctl --user -t ringlight --since "1 min ago" | grep -i cursor
 ```
@@ -1392,7 +1412,7 @@ Expected: clean.
 - [ ] **Step 6: Install and verify the hole**
 
 ```bash
-sudo cp target/release/ringlight /usr/local/bin/ && pkill -x ringlight
+sudo cp target/release/ringlight /usr/local/bin/ && pkill -x cosmic-panel
 ```
 
 Toggle on, set Cursor Hole to **M**, and check all five:
@@ -1580,11 +1600,11 @@ Expected: clean.
 - [ ] **Step 8: Verify persistence survives a restart**
 
 ```bash
-sudo cp target/release/ringlight /usr/local/bin/ && pkill -x ringlight
+sudo cp target/release/ringlight /usr/local/bin/ && pkill -x cosmic-panel
 ```
 
 1. Set brightness to a distinctive value, choose glow size **L** and cursor hole **S**.
-2. `pkill -x ringlight` and wait for cosmic-panel to respawn it.
+2. `pkill -x cosmic-panel` and wait for cosmic-panel to respawn it.
 3. Open the popup: brightness, glow size and hole size must all be as you left them.
 4. Confirm the file exists: `ls ~/.config/cosmic/com.github.twigglits.ringlight/`
 
@@ -1722,7 +1742,7 @@ Update the requirements section: remove any mention of `input` group membership 
 - [ ] **Step 6: Final end-to-end verification**
 
 ```bash
-sudo cp target/release/ringlight /usr/local/bin/ && pkill -x ringlight
+sudo cp target/release/ringlight /usr/local/bin/ && pkill -x cosmic-panel
 ```
 
 Walk the full acceptance list:
@@ -1735,7 +1755,7 @@ Walk the full acceptance list:
 6. The cursor hole follows the cursor accurately at all four edges and corners.
 7. Brightness, colour temperature, glow size and hole size all take effect.
 8. Presets apply.
-9. Settings survive `pkill -x ringlight`.
+9. Settings survive `pkill -x cosmic-panel`.
 10. Starting a video call with **Auto (camera)** on turns the glow on; ending it turns it off.
 
 - [ ] **Step 7: Commit**

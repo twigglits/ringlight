@@ -6,13 +6,12 @@
 //   - Four transparent layer-shell surfaces (one per screen edge) for the glow
 //   - Background subscriptions for camera monitoring and mouse tracking
 
-use crate::overlay::{self, EdgeSide, GlowCache, GlowProgram};
 use crate::settings::{GlowSize, HoleSize, RingLightSettings};
 use cosmic::app::{Core, Task};
 use futures_util::FutureExt;
 use cosmic::iced::platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup};
 use cosmic::iced::window::Id;
-use cosmic::iced::{widget::canvas::Canvas, Alignment, Length, Limits, Subscription};
+use cosmic::iced::{Alignment, Length, Limits, Subscription};
 use cosmic::widget;
 use cosmic::{Application, Element};
 
@@ -30,11 +29,7 @@ pub struct RingLight {
     popup: Option<Id>,
     settings: RingLightSettings,
     camera_active: bool,
-    mouse_pos: (f64, f64),
-    screen_size: (f32, f32),
-    /// Layer surface IDs: [top, bottom, left, right]
-    overlay_ids: [Option<Id>; 4],
-    glow_cache: GlowCache,
+    overlay_id: Option<Id>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,7 +42,6 @@ pub enum Message {
     SetGlowSize(GlowSize),
     SetHoleSize(HoleSize),
     CameraStateChanged(bool),
-    MouseMoved(f64, f64),
     ApplyPreset(&'static str),
     Quit,
 }
@@ -65,10 +59,7 @@ impl Application for RingLight {
             popup: None,
             settings: RingLightSettings::default(),
             camera_active: false,
-            mouse_pos: (960.0, 540.0),
-            screen_size: (1920.0, 1080.0),
-            overlay_ids: [None; 4],
-            glow_cache: GlowCache::new(),
+            overlay_id: None,
         };
         (app, Task::none())
     }
@@ -98,18 +89,12 @@ impl Application for RingLight {
     // -- Popup / overlay views -----------------------------------------------
 
     fn view_window(&self, id: Id) -> Element<'_, Self::Message> {
-        // Popup controls
         if self.popup == Some(id) {
             return self.popup_view();
         }
-
-        // Overlay glow surface
-        for (i, sid) in self.overlay_ids.iter().enumerate() {
-            if *sid == Some(id) {
-                return self.overlay_view(overlay::edge_from_index(i));
-            }
+        if self.overlay_id == Some(id) {
+            return self.overlay_view();
         }
-
         widget::text("").into()
     }
 
@@ -141,7 +126,6 @@ impl Application for RingLight {
 
             Message::ToggleEnabled(on) => {
                 self.settings.enabled = on;
-                self.glow_cache.clear_all();
                 return self.sync_overlay();
             }
             Message::ToggleAutoMode(on) => {
@@ -149,41 +133,27 @@ impl Application for RingLight {
                 if on {
                     self.settings.enabled = self.camera_active;
                 }
-                self.glow_cache.clear_all();
                 return self.sync_overlay();
             }
 
             Message::SetBrightness(b) => {
                 self.settings.brightness = b;
-                self.glow_cache.clear_all();
             }
             Message::SetColorTemp(t) => {
                 self.settings.color_temp = t;
-                self.glow_cache.clear_all();
             }
             Message::SetGlowSize(s) => {
                 self.settings.glow_size = s;
-                self.glow_cache.clear_all();
-                // Surface sizes change → recreate
-                return self.recreate_overlay();
             }
             Message::SetHoleSize(s) => {
                 self.settings.hole_size = s;
-                self.glow_cache.clear_all();
             }
 
             Message::CameraStateChanged(active) => {
                 self.camera_active = active;
                 if self.settings.auto_mode {
                     self.settings.enabled = active;
-                    self.glow_cache.clear_all();
                     return self.sync_overlay();
-                }
-            }
-            Message::MouseMoved(x, y) => {
-                self.mouse_pos = (x, y);
-                if self.settings.hole_size != HoleSize::Off && self.is_active() {
-                    self.glow_cache.clear_all();
                 }
             }
 
@@ -211,8 +181,6 @@ impl Application for RingLight {
                     }
                     _ => {}
                 }
-                self.glow_cache.clear_all();
-                return self.recreate_overlay();
             }
 
             Message::Quit => {
@@ -236,23 +204,7 @@ impl Application for RingLight {
             .flatten_stream()
         });
 
-        let mouse_sub = {
-            let (sw, sh) = (self.screen_size.0 as u32, self.screen_size.1 as u32);
-            Subscription::run_with((sw, sh), move |&(sw, sh)| {
-                async move {
-                    let rx =
-                        crate::mouse::start_tracker(sw as f64, sh as f64);
-                    futures_util::stream::unfold(rx, |mut rx| async {
-                        rx.changed().await.ok()?;
-                        let (x, y) = *rx.borrow();
-                        Some((Message::MouseMoved(x, y), rx))
-                    })
-                }
-                .flatten_stream()
-            })
-        };
-
-        Subscription::batch(vec![camera_sub, mouse_sub])
+        camera_sub
     }
 }
 
@@ -276,95 +228,62 @@ impl RingLight {
         }
     }
 
-    /// Destroy then recreate (e.g. after glow-size change).
-    fn recreate_overlay(&mut self) -> Task<Message> {
-        let destroy = self.destroy_overlay();
-        let create = if self.is_active() {
-            self.create_overlay()
-        } else {
-            Task::none()
-        };
-        Task::batch(vec![destroy, create])
-    }
-
     fn create_overlay(&mut self) -> Task<Message> {
-        let glow_w = self.settings.glow_width() as u32;
-        let mut cmds = Vec::new();
-
-        let edges: [(Anchor, (Option<u32>, Option<u32>)); 4] = [
-            // Top: anchor T+L+R, full width, height = glow_w
-            (
-                Anchor::TOP | Anchor::LEFT | Anchor::RIGHT,
-                (None, Some(glow_w)),
-            ),
-            // Bottom: anchor B+L+R
-            (
-                Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
-                (None, Some(glow_w)),
-            ),
-            // Left: anchor L+T+B, width = glow_w, full height
-            (
-                Anchor::LEFT | Anchor::TOP | Anchor::BOTTOM,
-                (Some(glow_w), None),
-            ),
-            // Right: anchor R+T+B
-            (
-                Anchor::RIGHT | Anchor::TOP | Anchor::BOTTOM,
-                (Some(glow_w), None),
-            ),
-        ];
-
-        for (i, (anchor, size)) in edges.into_iter().enumerate() {
-            if self.overlay_ids[i].is_some() {
-                continue;
-            }
-            let id = Id::unique();
-            self.overlay_ids[i] = Some(id);
-
-            cmds.push(get_layer_surface(SctkLayerSurfaceSettings {
-                id,
-                keyboard_interactivity: KeyboardInteractivity::None,
-                namespace: format!("ringlight-edge-{}", i),
-                // Layer::Top (not Overlay): cosmic-comp appears to force input-grab
-                // on Overlay-layer surfaces, ignoring the empty input_zone below.
-                layer: Layer::Top,
-                size: Some(size),
-                anchor,
-                exclusive_zone: 0,
-                // Empty input zone => empty wl_region => the surface accepts no
-                // pointer input, so clicks in the glow strip pass through to the
-                // window beneath. Without this the strip grabs every click that
-                // lands on it (input_zone: None means "accept all input").
-                input_zone: Some(Vec::new()),
-                ..Default::default()
-            }));
+        if self.overlay_id.is_some() {
+            return Task::none();
         }
+        let id = Id::unique();
+        self.overlay_id = Some(id);
 
-        Task::batch(cmds)
+        get_layer_surface(SctkLayerSurfaceSettings {
+            id,
+            keyboard_interactivity: KeyboardInteractivity::None,
+            namespace: "ringlight".to_string(),
+            // Top, not Overlay: the glow belongs above windows but below the
+            // OSD and lock screen.
+            layer: Layer::Top,
+            // Anchored to both opposite edge pairs, so the compositor stretches
+            // the surface across the whole output regardless of `size`.
+            anchor: Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
+            size: Some((None, None)),
+            // -1, not 0: 0 means "move me so I don't occlude the panel", which
+            // pushes the glow inward off the true screen edge.
+            exclusive_zone: -1,
+            // Empty input region => no pointer input at all => click-through.
+            input_zone: Some(Vec::new()),
+            // The default max is 1920x1080, which would clamp larger screens.
+            size_limits: Limits::NONE
+                .min_width(1.0)
+                .min_height(1.0)
+                .max_width(16384.0)
+                .max_height(16384.0),
+            ..Default::default()
+        })
     }
 
     fn destroy_overlay(&mut self) -> Task<Message> {
-        let cmds: Vec<_> = self
-            .overlay_ids
-            .iter_mut()
-            .filter_map(|slot| slot.take().map(destroy_layer_surface))
-            .collect();
-        Task::batch(cmds)
+        match self.overlay_id.take() {
+            Some(id) => destroy_layer_surface(id),
+            None => Task::none(),
+        }
     }
 
     // -- View builders -------------------------------------------------------
 
-    fn overlay_view(&self, edge: EdgeSide) -> Element<'_, Message> {
-        let program = GlowProgram {
-            cache: self.glow_cache.cache_for(edge),
-            settings: &self.settings,
-            mouse_pos: (self.mouse_pos.0 as f32, self.mouse_pos.1 as f32),
-            screen_size: self.screen_size,
-            edge,
-        };
-        Canvas::new(program)
+    // Task 1 placeholder: a flat wash proves surface geometry, click-through
+    // and lifecycle without involving the GPU pipeline. Task 2 replaces it.
+    fn overlay_view(&self) -> Element<'_, Message> {
+        widget::container(widget::Space::new())
             .width(Length::Fill)
             .height(Length::Fill)
+            .class(cosmic::theme::Container::custom(|_theme| {
+                cosmic::widget::container::Style {
+                    background: Some(cosmic::iced::Background::Color(
+                        cosmic::iced::Color::from_rgba(1.0, 0.78, 0.55, 0.25),
+                    )),
+                    ..Default::default()
+                }
+            }))
             .into()
     }
 
