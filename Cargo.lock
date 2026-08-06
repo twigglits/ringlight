@@ -4026,6 +4026,7 @@ dependencies = [
 name = "ringlight"
 version = "0.2.0"
 dependencies = [
+ "bytemuck",
  "env_logger",
  "futures-util",
  "libcosmic",

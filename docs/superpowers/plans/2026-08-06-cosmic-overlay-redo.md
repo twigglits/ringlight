@@ -1631,6 +1631,22 @@ defaults."
 - Consumes: everything above.
 - Produces: nothing.
 
+- [ ] **Step 0: Remove the development desktop override**
+
+Task 2 added `~/.local/share/applications/ringlight.desktop` so the applet ran
+from `target/release` without needing `sudo` on every rebuild. It shadows the
+system entry and points at the build directory, which breaks if the repo moves.
+Remove it and reinstall properly:
+
+```bash
+rm -f ~/.local/share/applications/ringlight.desktop
+sudo cp target/release/ringlight /usr/local/bin/
+pkill -x cosmic-panel
+sleep 5 && readlink -f /proc/$(pgrep -x ringlight | head -1)/exe
+```
+
+Expected: `/usr/local/bin/ringlight`.
+
 - [ ] **Step 1: Remove the Quit control**
 
 A panel applet's lifetime belongs to cosmic-panel; `process::exit(0)` leaves a dead icon in the panel.

@@ -1,5 +1,6 @@
 mod app;
 mod camera;
+mod glow;
 mod settings;
 
 fn main() -> cosmic::iced::Result {

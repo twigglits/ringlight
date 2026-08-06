@@ -6,8 +6,10 @@
 //   - Four transparent layer-shell surfaces (one per screen edge) for the glow
 //   - Background subscriptions for camera monitoring and mouse tracking
 
+use crate::glow::GlowProgram;
 use crate::settings::{GlowSize, HoleSize, RingLightSettings};
 use cosmic::app::{Core, Task};
+use cosmic::iced_widget::shader::Shader;
 use futures_util::FutureExt;
 use cosmic::iced::platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup};
 use cosmic::iced::window::Id;
@@ -270,21 +272,17 @@ impl RingLight {
 
     // -- View builders -------------------------------------------------------
 
-    // Task 1 placeholder: a flat wash proves surface geometry, click-through
-    // and lifecycle without involving the GPU pipeline. Task 2 replaces it.
     fn overlay_view(&self) -> Element<'_, Message> {
-        widget::container(widget::Space::new())
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .class(cosmic::theme::Container::custom(|_theme| {
-                cosmic::widget::container::Style {
-                    background: Some(cosmic::iced::Background::Color(
-                        cosmic::iced::Color::from_rgba(1.0, 0.78, 0.55, 0.25),
-                    )),
-                    ..Default::default()
-                }
-            }))
-            .into()
+        Shader::new(GlowProgram {
+            color: self.settings.glow_color(),
+            brightness: self.settings.brightness,
+            glow_fraction: 0.10,
+            hole_fraction: 0.0,
+            cursor: [0.5, 0.5],
+        })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
     }
 
     fn popup_view(&self) -> Element<'_, Message> {
