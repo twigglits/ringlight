@@ -49,24 +49,6 @@ pub enum Message {
     CursorMoved(crate::cursor::CursorState),
     ApplyPreset(&'static str),
     PersistSettings,
-    ReapplyInputZone,
-}
-
-/// Re-send an empty input region for an existing layer surface.
-///
-/// libcosmic exposes no public command for this (only `set_layer`, `set_size`
-/// and friends), so the internal action is constructed directly, mirroring how
-/// those commands are built.
-fn set_empty_input_zone(id: Id) -> Task<Message> {
-    use cosmic::iced_runtime::platform_specific::{self, wayland};
-    cosmic::iced_runtime::task::effect(cosmic::iced_runtime::Action::PlatformSpecific(
-        platform_specific::Action::Wayland(wayland::Action::LayerSurface(
-            wayland::layer_surface::Action::InputZone {
-                id,
-                zone: Some(Vec::new()),
-            },
-        )),
-    ))
 }
 
 impl Application for RingLight {
@@ -220,12 +202,6 @@ impl Application for RingLight {
                 crate::config::save(&self.settings);
             }
 
-            Message::ReapplyInputZone => {
-                if let Some(id) = self.overlay_id {
-                    return set_empty_input_zone(id);
-                }
-            }
-
         }
         Task::none()
     }
@@ -278,34 +254,7 @@ impl Application for RingLight {
             .flatten_stream()
         });
 
-        let mut subs = vec![camera_sub, cursor_sub];
-
-        // Keep re-asserting the empty input region while the overlay exists.
-        //
-        // iced sets the input region once, before the layer surface is mapped,
-        // and cosmic-comp discards it: the surface then accepts pointer input
-        // across the whole screen and swallows every click. Re-applying after
-        // the surface is mapped makes it stick. Verified by instrumenting the
-        // shader's event handler -- 225 stolen mouse events before, 0 after.
-        //
-        // This repeats rather than firing once because there is no "mapped"
-        // event to hook, and it is self-healing if the region is ever dropped
-        // again (output change, remap). One tiny Wayland request per second,
-        // and only while the glow is actually on.
-        if self.is_active() {
-            subs.push(Subscription::run(|| {
-                async {
-                    let interval = tokio::time::interval(Duration::from_secs(1));
-                    futures_util::stream::unfold(interval, |mut i| async move {
-                        i.tick().await;
-                        Some((Message::ReapplyInputZone, i))
-                    })
-                }
-                .flatten_stream()
-            }));
-        }
-
-        Subscription::batch(subs)
+        Subscription::batch(vec![camera_sub, cursor_sub])
     }
 }
 
