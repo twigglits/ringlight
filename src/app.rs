@@ -3,37 +3,31 @@
 // Architecture:
 //   - Panel icon button in the COSMIC panel bar
 //   - Popup window with brightness / color-temp / size / preset controls
-//   - Four transparent layer-shell surfaces (one per screen edge) for the glow
-//   - Background subscriptions for camera monitoring and mouse tracking
+//   - A child process that owns the glow surface (see ipc.rs for why it cannot
+//     live here) and is fed settings over its stdin
+//   - Background subscription for camera monitoring
+//
+// The cursor is tracked by the overlay process, not here: it is the only part
+// that needs it, and doing it there saves this process a Wayland connection.
 
-use crate::glow::GlowProgram;
-use crate::settings::{GlowSize, HoleSize, RingLightSettings};
+use crate::ipc::OverlayProcess;
+use crate::settings::{GlowSize, HoleSize};
 use cosmic::app::{Core, Task};
-use cosmic::iced_widget::shader::Shader;
 use futures_util::FutureExt;
 use cosmic::iced::platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup};
 use cosmic::iced::window::Id;
 use cosmic::iced::{Alignment, Length, Limits, Subscription};
 use cosmic::widget;
 use cosmic::{Application, Element};
-use std::time::{Duration, Instant};
-
-// Layer-surface commands and types.
-// Verified paths for the pop-os/iced fork used by libcosmic:
-use cosmic::iced::platform_specific::shell::commands::layer_surface::{
-    destroy_layer_surface, get_layer_surface, Anchor, KeyboardInteractivity, Layer,
-};
-use cosmic::iced::platform_specific::runtime::wayland::layer_surface::SctkLayerSurfaceSettings;
 
 const APP_ID: &str = "com.github.twigglits.ringlight";
 
 pub struct RingLight {
     core: Core,
     popup: Option<Id>,
-    settings: RingLightSettings,
+    settings: crate::settings::RingLightSettings,
     camera_active: bool,
-    overlay_id: Option<Id>,
-    cursor: crate::cursor::CursorState,
+    overlay: Option<OverlayProcess>,
 }
 
 #[derive(Debug, Clone)]
@@ -46,7 +40,6 @@ pub enum Message {
     SetGlowSize(GlowSize),
     SetHoleSize(HoleSize),
     CameraStateChanged(bool),
-    CursorMoved(crate::cursor::CursorState),
     ApplyPreset(&'static str),
     PersistSettings,
 }
@@ -64,14 +57,13 @@ impl Application for RingLight {
             popup: None,
             settings: crate::config::load(),
             camera_active: false,
-            overlay_id: None,
-            cursor: crate::cursor::CursorState::default(),
+            overlay: None,
         };
-        // Persisted `enabled` has to be honoured here: nothing else creates the
+        // Persisted `enabled` has to be honoured here: nothing else starts the
         // overlay until a toggle or a camera event arrives, so without this the
-        // applet starts up claiming to be on with a dark screen.
-        let restore = app.sync_overlay();
-        (app, restore)
+        // applet starts up claiming to be on with no glow.
+        app.sync_overlay();
+        (app, Task::none())
     }
 
     fn core(&self) -> &Core {
@@ -101,9 +93,6 @@ impl Application for RingLight {
     fn view_window(&self, id: Id) -> Element<'_, Self::Message> {
         if self.popup == Some(id) {
             return self.popup_view();
-        }
-        if self.overlay_id == Some(id) {
-            return self.overlay_view();
         }
         widget::text("").into()
     }
@@ -137,7 +126,7 @@ impl Application for RingLight {
             Message::ToggleEnabled(on) => {
                 self.settings.enabled = on;
                 crate::config::save(&self.settings);
-                return self.sync_overlay();
+                self.sync_overlay();
             }
             Message::ToggleAutoMode(on) => {
                 self.settings.auto_mode = on;
@@ -145,34 +134,34 @@ impl Application for RingLight {
                     self.settings.enabled = self.camera_active;
                 }
                 crate::config::save(&self.settings);
-                return self.sync_overlay();
+                self.sync_overlay();
             }
 
             Message::SetBrightness(b) => {
                 self.settings.brightness = b;
+                self.push_settings();
             }
             Message::SetColorTemp(t) => {
                 self.settings.color_temp = t;
+                self.push_settings();
             }
             Message::SetGlowSize(s) => {
                 self.settings.glow_size = s;
                 crate::config::save(&self.settings);
+                self.push_settings();
             }
             Message::SetHoleSize(s) => {
                 self.settings.hole_size = s;
                 crate::config::save(&self.settings);
+                self.push_settings();
             }
 
             Message::CameraStateChanged(active) => {
                 self.camera_active = active;
                 if self.settings.auto_mode {
                     self.settings.enabled = active;
-                    return self.sync_overlay();
+                    self.sync_overlay();
                 }
-            }
-
-            Message::CursorMoved(c) => {
-                self.cursor = c;
             }
 
             Message::ApplyPreset(name) => {
@@ -200,10 +189,12 @@ impl Application for RingLight {
                     _ => {}
                 }
                 crate::config::save(&self.settings);
+                self.push_settings();
             }
 
             Message::PersistSettings => {
                 crate::config::save(&self.settings);
+                self.push_settings();
             }
 
         }
@@ -224,41 +215,7 @@ impl Application for RingLight {
             .flatten_stream()
         });
 
-        // The watch channel coalesces, and this throttles further: at most one
-        // message per frame, and nothing at all for sub-pixel movement. The
-        // old code emitted one message per raw input event and repainted four
-        // surfaces for each.
-        let cursor_sub = Subscription::run(|| {
-            async {
-                let rx = crate::cursor::start();
-                let init = *rx.borrow();
-                futures_util::stream::unfold(
-                    (rx, Instant::now(), init),
-                    |(mut rx, mut last_emit, mut last)| async move {
-                        loop {
-                            rx.changed().await.ok()?;
-                            let now = *rx.borrow();
-
-                            let moved = (now.pos[0] - last.pos[0]).abs()
-                                + (now.pos[1] - last.pos[1]).abs()
-                                > 0.0005; // ~1.5px on a 3000px-wide output
-                            let toggled = now.visible != last.visible;
-
-                            if toggled
-                                || (moved && last_emit.elapsed() >= Duration::from_millis(16))
-                            {
-                                last_emit = Instant::now();
-                                last = now;
-                                return Some((Message::CursorMoved(now), (rx, last_emit, last)));
-                            }
-                        }
-                    },
-                )
-            }
-            .flatten_stream()
-        });
-
-        Subscription::batch(vec![camera_sub, cursor_sub])
+        camera_sub
     }
 }
 
@@ -271,75 +228,55 @@ impl RingLight {
         self.settings.enabled || (self.settings.auto_mode && self.camera_active)
     }
 
-    // -- Overlay surface lifecycle -------------------------------------------
+    // -- Overlay process lifecycle -------------------------------------------
 
-    /// Ensure overlay surfaces match the current enabled state.
-    fn sync_overlay(&mut self) -> Task<Message> {
+    /// Ensure the overlay process matches the current enabled state.
+    fn sync_overlay(&mut self) {
         if self.is_active() {
-            self.create_overlay()
+            self.start_overlay();
         } else {
-            self.destroy_overlay()
+            // Drop kills the child, so the glow goes with it.
+            self.overlay = None;
         }
     }
 
-    fn create_overlay(&mut self) -> Task<Message> {
-        if self.overlay_id.is_some() {
-            return Task::none();
+    fn start_overlay(&mut self) {
+        if self.overlay.is_some() {
+            return;
         }
-        let id = Id::unique();
-        self.overlay_id = Some(id);
-
-        get_layer_surface(SctkLayerSurfaceSettings {
-            id,
-            keyboard_interactivity: KeyboardInteractivity::None,
-            namespace: "ringlight".to_string(),
-            // Top, not Overlay: the glow belongs above windows but below the
-            // OSD and lock screen.
-            layer: Layer::Top,
-            // Anchored to both opposite edge pairs, so the compositor stretches
-            // the surface across the whole output regardless of `size`.
-            anchor: Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
-            size: Some((None, None)),
-            // -1, not 0: 0 means "move me so I don't occlude the panel", which
-            // pushes the glow inward off the true screen edge.
-            exclusive_zone: -1,
-            // Empty input region => no pointer input at all => click-through.
-            input_zone: Some(Vec::new()),
-            // The default max is 1920x1080, which would clamp larger screens.
-            size_limits: Limits::NONE
-                .min_width(1.0)
-                .min_height(1.0)
-                .max_width(16384.0)
-                .max_height(16384.0),
-            ..Default::default()
-        })
+        // Launching our own executable rather than a looked-up name keeps the
+        // two halves the same build even for an uninstalled binary.
+        let exe = match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(e) => {
+                log::warn!("ringlight: cannot locate own executable, no glow: {e}");
+                return;
+            }
+        };
+        match OverlayProcess::spawn(crate::ipc::overlay_command(&exe)) {
+            Ok(mut child) => {
+                // Send immediately: the child boots from the config file, which
+                // is stale for anything not yet persisted (a mid-drag slider).
+                child.send(&self.settings);
+                self.overlay = Some(child);
+            }
+            Err(e) => log::warn!("ringlight: could not start overlay process: {e}"),
+        }
     }
 
-    fn destroy_overlay(&mut self) -> Task<Message> {
-        match self.overlay_id.take() {
-            Some(id) => destroy_layer_surface(id),
-            None => Task::none(),
+    /// Push current settings to the overlay process, if one is running.
+    fn push_settings(&mut self) {
+        let broken = match self.overlay.as_mut() {
+            Some(child) => !child.send(&self.settings),
+            None => false,
+        };
+        if broken {
+            log::warn!("ringlight: overlay process went away");
+            self.overlay = None;
         }
     }
 
     // -- View builders -------------------------------------------------------
-
-    fn overlay_view(&self) -> Element<'_, Message> {
-        Shader::new(GlowProgram {
-            color: self.settings.glow_color(),
-            brightness: self.settings.brightness,
-            glow_fraction: self.settings.glow_fraction(),
-            hole_fraction: if self.cursor.visible {
-                self.settings.hole_fraction()
-            } else {
-                0.0
-            },
-            cursor: self.cursor.pos,
-        })
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
-    }
 
     fn popup_view(&self) -> Element<'_, Message> {
         let active = self.is_active();
