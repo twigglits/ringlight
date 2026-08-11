@@ -1,111 +1,46 @@
+mod app;
 mod camera;
-mod extension_installer;
-mod layer_shell;
-mod mouse;
+mod config;
+mod cursor;
+mod glow;
+mod ipc;
 mod overlay;
-mod renderer;
 mod settings;
-mod tray;
 
-use gtk::prelude::*;
-use settings::{new_shared_state, GlowSize, Preset};
-use tray::TrayCommand;
+/// The binary is both the panel applet and the overlay process it spawns.
+/// One binary keeps them in lockstep: the applet launches its own executable,
+/// so the two halves can never be different versions.
+fn wants_overlay(args: &[String]) -> bool {
+    args.iter().any(|a| a == ipc::OVERLAY_FLAG)
+}
 
-fn main() {
-    let application = gtk::Application::new(
-        Some("com.github.ringlight"),
-        gio::ApplicationFlags::FLAGS_NONE,
-    );
+fn main() -> cosmic::iced::Result {
+    env_logger::init();
 
-    application.connect_activate(|app| {
-        extension_installer::ensure_extension_installed();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if wants_overlay(&args) {
+        return overlay::run();
+    }
+    cosmic::applet::run::<app::RingLight>(())
+}
 
-        let state = new_shared_state();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        // Create overlay window
-        let window = overlay::create_overlay(state.clone());
-        app.add_window(&window);
+    #[test]
+    fn the_overlay_flag_selects_overlay_mode() {
+        assert!(wants_overlay(&[crate::ipc::OVERLAY_FLAG.to_string()]));
+    }
 
-        // Start system tray and get channel for commands
-        let (receiver, camera_sender) = tray::start_tray(state.clone());
+    #[test]
+    fn no_arguments_means_panel_applet() {
+        // cosmic-panel launches the applet with no arguments at all.
+        assert!(!wants_overlay(&[]));
+    }
 
-        // Start camera monitor (sends CameraStateChanged via the same channel)
-        camera::start_camera_monitor(camera_sender);
-
-        let state_cmd = state.clone();
-        let window_cmd = window.clone();
-        receiver.attach(None, move |cmd| {
-            {
-                let mut s = state_cmd.lock().unwrap();
-                match cmd {
-                    TrayCommand::Toggle => {
-                        s.enabled = !s.enabled;
-                    }
-                    TrayCommand::ToggleAutoMode => {
-                        s.auto_mode = !s.auto_mode;
-                        // If turning auto on, sync with current camera state
-                        if s.auto_mode {
-                            s.enabled = s.camera_active;
-                        }
-                    }
-                    TrayCommand::BrightnessUp => {
-                        s.brightness = (s.brightness + 0.1).min(1.0);
-                    }
-                    TrayCommand::BrightnessDown => {
-                        s.brightness = (s.brightness - 0.1).max(0.0);
-                    }
-                    TrayCommand::Warmer => {
-                        s.color_temp = (s.color_temp - 0.1).max(0.0);
-                    }
-                    TrayCommand::Cooler => {
-                        s.color_temp = (s.color_temp + 0.1).min(1.0);
-                    }
-                    TrayCommand::SetGlowSize(size) => {
-                        s.glow_size = size;
-                    }
-                    TrayCommand::SetHoleSize(size) => {
-                        s.hole_size = size;
-                    }
-                    TrayCommand::ApplyPreset(p) => {
-                        match p {
-                            Preset::WarmReading => {
-                                s.brightness = 0.5;
-                                s.color_temp = 0.1;
-                                s.glow_size = GlowSize::Small;
-                            }
-                            Preset::CoolDaylight => {
-                                s.brightness = 0.8;
-                                s.color_temp = 0.9;
-                                s.glow_size = GlowSize::Medium;
-                            }
-                            Preset::Subtle => {
-                                s.brightness = 0.3;
-                                s.color_temp = 0.5;
-                                s.glow_size = GlowSize::Small;
-                            }
-                            Preset::Bright => {
-                                s.brightness = 1.0;
-                                s.color_temp = 0.5;
-                                s.glow_size = GlowSize::Large;
-                            }
-                        }
-                    }
-                    TrayCommand::CameraStateChanged(active) => {
-                        s.camera_active = active;
-                        if s.auto_mode {
-                            s.enabled = active;
-                        }
-                    }
-                    TrayCommand::Quit => {
-                        gtk::main_quit();
-                        return glib::ControlFlow::Break;
-                    }
-                }
-            }
-            overlay::queue_redraw(&window_cmd);
-            glib::ControlFlow::Continue
-        });
-    });
-
-    application.run();
+    #[test]
+    fn unrelated_arguments_do_not_select_overlay_mode() {
+        assert!(!wants_overlay(&["--help".to_string()]));
+    }
 }

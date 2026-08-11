@@ -1,10 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=Ring Light
+Name=Ringlight
 Comment=Desktop ring light overlay for video calls
 Exec=ringlight
 Icon=display-brightness-symbolic
 Categories=Utility;
-Keywords=light;ring;video;webcam;
+Keywords=light;ring;video;webcam;overlay;
 StartupNotify=false
 Terminal=false
+NoDisplay=true
+X-CosmicApplet=true
