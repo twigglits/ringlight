@@ -59,7 +59,7 @@ impl Application for RingLight {
     const APP_ID: &'static str = APP_ID;
 
     fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Self::Message>) {
-        let app = Self {
+        let mut app = Self {
             core,
             popup: None,
             settings: crate::config::load(),
@@ -67,7 +67,11 @@ impl Application for RingLight {
             overlay_id: None,
             cursor: crate::cursor::CursorState::default(),
         };
-        (app, Task::none())
+        // Persisted `enabled` has to be honoured here: nothing else creates the
+        // overlay until a toggle or a camera event arrives, so without this the
+        // applet starts up claiming to be on with a dark screen.
+        let restore = app.sync_overlay();
+        (app, restore)
     }
 
     fn core(&self) -> &Core {
