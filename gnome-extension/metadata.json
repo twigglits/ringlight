@@ -1,0 +1,9 @@
+{
+  "uuid": "ringlight-cursor@ringlight",
+  "name": "Ringlight",
+  "description": "Puts a soft, warm glow around the edges of your screen so your face is lit during video calls. Turns itself on whenever an app opens the webcam, and clears a hole in the glow around the pointer. Brightness, colour and size are in the panel menu and the extension settings.",
+  "shell-version": ["45", "46", "47", "48"],
+  "settings-schema": "org.gnome.shell.extensions.ringlight-cursor",
+  "url": "https://github.com/twigglits/ringlight",
+  "version": 1
+}

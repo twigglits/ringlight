@@ -4,11 +4,16 @@
 
 Desktop ring light overlay for Pop!_OS on the COSMIC desktop (System76). Adds a warm glow around screen edges during video calls, with automatic camera detection.
 
-**Two crates, two `.deb` packages.** The repository root is the COSMIC build
-(`ringlight-cosmic`). `gnome/` is a separate crate for the GNOME build
-(`ringlight-gnome`) — GTK3/cairo/ksni, restored from the pre-COSMIC history at
-`649dec7`. Everything below documents the COSMIC crate unless it says otherwise.
-See "Packaging" for how the two are built and released.
+**One crate, one extension.** The repository root is the COSMIC build
+(`ringlight-cosmic`, a `.deb`). `gnome-extension/` is the GNOME build: a GNOME
+Shell extension in GJS, published to extensions.gnome.org, no binary at all.
+Everything below documents the COSMIC crate unless it says otherwise; the GNOME
+half has its own section at the end.
+
+**There was a `gnome/` Rust crate (GTK3/cairo/ksni) and it is gone** — deleted,
+not paused, see "The GNOME build" for the measurements that killed it. Do not
+resurrect it from history: on GNOME Wayland it cannot draw the overlay, and the
+`.deb` it produced installed cleanly and then did nothing visible.
 
 ## Tech stack
 
@@ -110,46 +115,33 @@ cargo test --bins          # note: --bins, the crate has no lib target
 
 Requires Rust stable (1.94+). libcosmic is pulled from `https://github.com/pop-os/libcosmic.git`. First build downloads ~649 crates and takes several minutes.
 
-The GNOME crate is built separately and needs a different dep set:
-
-```bash
-sudo apt install -y build-essential libgtk-3-dev libgtk-layer-shell-dev libx11-dev pkgconf
-cd gnome && cargo build --release      # ~45s, no tests in this crate
-```
+The GNOME half is JavaScript — nothing to build. See "The GNOME build".
 
 ## Packaging
 
-Two `.deb`s, one per desktop, both via `cargo deb` (`cargo install cargo-deb`):
+One `.deb`, for COSMIC, via `cargo deb` (`cargo install cargo-deb`):
 
 ```bash
 cargo deb                    # → target/debian/ringlight-cosmic_<ver>-1_amd64.deb
-cd gnome && cargo deb        # → gnome/target/debian/ringlight-gnome_<ver>-1_amd64.deb
 ```
 
-`.github/workflows/release.yml` builds both on a `v*` tag (matrix over the two
-crates, differing apt deps and working dirs) and attaches them to one GitHub
-release. `cargo deb --output` there is given an absolute `$GITHUB_WORKSPACE`
-path because `matrix.dir` is `.` for one entry — a relative `../` would escape
-the workspace.
+`.github/workflows/release.yml` builds it on a `v*` tag and attaches it to a
+GitHub release. GNOME is not in that workflow at all — it ships through
+`publish-extension.yml` on any push touching `gnome-extension/`.
 
 Facts worth not rediscovering:
 
-- **`gnome/Cargo.toml` has an empty `[workspace]` table.** Without it Cargo
-  errors ("current package believes it's in a workspace when it's not") because
-  the crate is nested under the root package's directory. It is deliberately not
-  a workspace member: unifying GTK3 and libcosmic resolution in one lockfile has
-  no upside.
-- **Both packages ship `/usr/bin/ringlight`**, declare `Provides: ringlight`,
-  and `Conflicts:` each other, so only one is installable at a time and the
-  command name is the same either way. Renaming the binaries per-package instead
-  would break every `Exec=ringlight` desktop entry.
+- **`Conflicts: ringlight-gnome` stays** even though that package is retired.
+  Old GitHub releases still carry it, it ships the same `/usr/bin/ringlight`,
+  and it does not work on GNOME Wayland — letting the two coexist would be worse
+  than the stale line.
 - **`cosmic-panel` is `recommends`, not `depends`.** The applet is useless
   without it, but its package name is not verifiable across Pop!_OS / Ubuntu /
   Debian COSMIC repos, and a wrong `Depends` fails the install outright. Promote
   it to `depends` only after confirming the name on a live COSMIC repo.
-- **Version lives in two `Cargo.toml`s** (root and `gnome/`) and must be bumped
-  in both, plus `version` in `gnome/gnome-extension/metadata.json` when
-  resubmitting the extension.
+- **Version lives in one `Cargo.toml`** now. The extension's `metadata.json`
+  version is not a second copy of it — EGO owns that number and assigns its own
+  sequence on upload.
 - Verify a built package without installing it:
   `apt-get install -s ./path/to.deb` (simulate) and `dpkg-deb -I/-c`.
 
@@ -224,7 +216,112 @@ white the display out completely.
 - **Overlay in a child process**: not a style choice — an applet's Wayland connection comes from cosmic-panel and does not honour an empty input region, so an in-process overlay swallows every click. See "Why the overlay is a separate process"
 - **Child lifetime tied to a pipe, not a pid**: the child exits on stdin EOF, so a `pkill`ed or crashed applet cannot leave a full-screen surface stranded with no way to dismiss it. cosmic-panel SIGKILLs applets (exit 137), so this path is routine, not hypothetical
 - **The applet no longer tracks the cursor**: only the glow needs it, and doing it in the child saves the applet a Wayland connection
-- **`gnome/gnome-extension/` is live, not reference**: the GNOME crate `include_str!`s it at compile time and writes it to `~/.local/share/gnome-shell/extensions/` on first run, and `publish-extension.yml` uploads it to extensions.gnome.org. The COSMIC build does not use it. Its `uuid` (`ringlight-cursor@ringlight`) is the extensions.gnome.org identity — changing it makes a resubmission a brand-new listing instead of a new version, so leave it alone and bump `version` instead
+- **`gnome-extension/` is the whole GNOME product**, not a helper for a binary. `publish-extension.yml` uploads it to extensions.gnome.org on any push that touches it. The COSMIC build does not use it. Its `uuid` (`ringlight-cursor@ringlight`) is the extensions.gnome.org identity — changing it makes a resubmission a brand-new listing instead of a new version, so leave it alone even though the name no longer mentions cursors. Do *not* hand-maintain the `version` field: EGO assigns its own sequence number on upload and regenerates the metadata it serves (the repo sat at `1` while EGO was already serving `4`)
+
+## The GNOME build
+
+`gnome-extension/` — GJS, GNOME Shell 45+, published to EGO as
+`ringlight-cursor@ringlight`. It replaced a Rust GTK3 crate that could not work.
+
+```
+gnome-extension/
+├── extension.js   Panel button, overlay actor, wiring; the Extension subclass
+├── glow.js        Cairo painting. No shell imports, so it renders offline
+├── camera.js      CameraWatcher: sliced /proc sweep for /dev/video* holders
+├── prefs.js       Adw preferences window
+├── schemas/       GSettings schema (compiled by EGO on upload, not committed)
+└── tools/         check-glow.sh, check-camera.js, render-glow.js
+```
+
+### Why the glow has to be drawn by the shell
+
+A GTK3 window cannot be an overlay under mutter. Measured with `WAYLAND_DEBUG=1`
+on GNOME Shell 46 / Ubuntu, from the retired crate's fallback path:
+
+- The registry advertises `xdg_wm_base` and `gtk_shell1` and **no
+  `zwlr_layer_shell_v1`**. mutter has never implemented it and the maintainers
+  have repeatedly declined to; `gtk_layer_is_supported()` returns 0.
+- The fallback creates a plain `xdg_toplevel` — `set_title("Ringlight")`,
+  `set_app_id`, alt-tabbable, placed wherever mutter likes.
+- `set_keep_above`, `set_type_hint(Dock)`, `stick()` and `move_(0, 0)` emit
+  **zero Wayland requests between them**. They are X11-only; on the GTK3 Wayland
+  backend they are silent no-ops. There is no xdg-shell request to position a
+  toplevel, by design.
+- `wl_surface.set_input_region` *is* sent, so click-through was the one part
+  that worked.
+- `gdk_monitor_get_scale_factor: assertion 'GDK_IS_MONITOR (monitor)' failed`,
+  then `could not detect monitor size, using 1920x1080 fallback` — GTK3 Wayland
+  has no primary monitor, so the window was also the wrong size.
+
+`Main.layoutManager.addTopChrome(actor, {affectsInputRegion: false})` gets all
+of it — above windows, screen-sized, click-through — because the shell is the
+compositor. That is the only route on GNOME.
+
+`trackFullscreen` is deliberately `false`: a fullscreen video call is exactly
+when the light is wanted.
+
+### Camera detection is a sliced /proc sweep
+
+`Shell.CameraMonitor` exists and exposes `cameras-in-use`, and it is the wrong
+tool: gnome-shell links libpipewire and that property only sees PipeWire
+consumers, which most browsers and conferencing apps are not — they open
+`/dev/video*` directly. Using it would silently break the feature's whole point.
+
+So `camera.js` walks `/proc/*/fd` like the Rust version did, but this runs
+*inside the compositor*, where the measured 21ms full sweep would drop a frame
+every 2s poll. It is spread over `GLib.idle_add` callbacks with a 2ms budget
+each. Notes:
+
+- The budget is time, not a process count: fd counts per process are wildly
+  uneven (worst single process here, 148 fds, 1.09ms).
+- Listing `/proc` is itself up to ~4ms cold, so it waits for the first slice
+  rather than running on the timer.
+- Slices hold to 2.0ms, but the occasional ~9ms outlier still lands — /proc I/O
+  and SpiderMonkey GC, not the loop. `check-camera.js` bounds the worst
+  main-loop gap at 18ms, well under the ~21ms an unsliced sweep costs, so it
+  catches a regression to blocking without flaking on the tail.
+- `CameraWatcher`'s second constructor argument is a devices-list seam, there so
+  the check can force a full sweep on a machine with no webcam plugged in.
+
+### Testing it without logging out
+
+GNOME Shell cannot reload an extension mid-session under Wayland, so there is no
+edit-reload loop — every change to `extension.js` costs a logout. The two pieces
+with real logic in them are therefore kept runnable from a terminal:
+
+```bash
+gnome-extension/tools/check-glow.sh            # samples a rendered PNG against the maths
+gjs -m gnome-extension/tools/check-camera.js   # sweep correctness + main-loop cost
+gjs -m gnome-extension/tools/render-glow.js /tmp/g.png   # eyeball it
+```
+
+`glow.js` imports nothing from the shell purely so this stays possible. Keep it
+that way. For syntax, `node --input-type=module --check < file.js` parses GJS
+ESM fine and is faster than a logout.
+
+Installing a working copy locally:
+
+```bash
+EXT=~/.local/share/gnome-shell/extensions/ringlight-cursor@ringlight
+mkdir -p "$EXT/schemas"
+cp gnome-extension/*.js "$EXT/"
+cp gnome-extension/schemas/*.gschema.xml "$EXT/schemas/"
+glib-compile-schemas "$EXT/schemas/"        # EGO does this on upload; local installs must
+sed 's/"version": 1/"version": 5/' gnome-extension/metadata.json > "$EXT/metadata.json"
+```
+
+The `version` bump is not cosmetic: EGO serves version 4, and with automatic
+updates on, the Extensions app reinstalls EGO's copy over a lower-numbered local
+one at login — silently reverting whatever you were testing.
+
+### Packing
+
+`gnome-extensions pack` (and the EGO upload action, which mirrors it) includes
+only `metadata.json`, `extension.js`, `prefs.js`, `stylesheet.css` and the
+schema. **`glow.js` and `camera.js` must be listed as `extra-source` or they are
+dropped from the zip and the extension fails to load.** `publish-extension.yml`
+passes them; check that first if a published version breaks and the local copy
+does not.
 
 ## Verified libcosmic import paths (as of 2026-08-06)
 
@@ -273,7 +370,8 @@ use cosmic::cosmic_config::CosmicConfigEntry;
 - Compiles clean; `cargo clippy --all-targets` clean; 24 unit tests pass
 - Runtime-verified on Pop!_OS 24.04 COSMIC, originally on eDP-1 (3000x2000 @ 200%) and re-verified on DP-1 (3440x1440): glow falloff, corner uniformity, cursor-hole alignment and settings persistence were all confirmed by sampling screenshots against the shader maths, not by eye. Measured alpha tracks the shader to a mean error of ~0.01–0.03 across the falloff band, with all four edges agreeing
 - **Click-through is fixed and confirmed** on the two-process design: clicks, drags and window moves all work with the glow on. The single-process applet version swallowed every click; see "Why the overlay is a separate process"
-- Both `.deb`s build and pass `apt-get install -s`; `dpkg-deb -c` shows binary, desktop entry and licence in the right places. The GNOME crate builds with zero warnings
-- **This machine now runs Ubuntu GNOME, not COSMIC** (`XDG_CURRENT_DESKTOP=ubuntu:GNOME`, no `cosmic-*` in apt). The COSMIC runtime measurements above were taken when it ran Pop!_OS COSMIC and **cannot be re-run here** — the screenshot/alpha-sampling recipes below need cosmic-comp. The GNOME half is the testable one now
-- Neither `.deb` has been runtime-tested as an installed package, only built and simulated
+- The COSMIC `.deb` builds and passes `apt-get install -s`; `dpkg-deb -c` shows binary, desktop entry and licence in the right places. It has never been runtime-tested as an installed package, only built and simulated
+- **This machine now runs Ubuntu GNOME, not COSMIC** (`XDG_CURRENT_DESKTOP=ubuntu:GNOME`, no `cosmic-*` in apt). The COSMIC runtime measurements above were taken when it ran Pop!_OS COSMIC and **cannot be re-run here** — the screenshot/alpha-sampling recipes need cosmic-comp. The GNOME half is the testable one now
+- **GNOME extension**: `check-glow.sh` passes — measured alpha tracks the shader maths to 0.002 at the falloff band, edges reach 1.0, interior and pointer cut-out are 0.0. `check-camera.js` passes, including the main-loop-stall bound. Both were run on GNOME Shell 46. What is *not* verified is the extension actually loading: that needs a logout, and no webcam was attached to this machine to exercise auto-mode end to end. `journalctl -f -o cat /usr/bin/gnome-shell` is where a load failure would show
+- The EGO listing is id 9483, `ringlight-cursor@ringlight`, serving version 4 at the time of the rewrite
 - Design and plan: `docs/superpowers/specs/` and `docs/superpowers/plans/`

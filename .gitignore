@@ -24,3 +24,7 @@ target
 # Added by cargo
 
 /target
+
+# GNOME extension: compiled by glib-compile-schemas for local installs,
+# and by extensions.gnome.org on upload. Never a source file.
+gnome-extension/schemas/gschemas.compiled

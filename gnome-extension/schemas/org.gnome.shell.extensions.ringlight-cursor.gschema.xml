@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.ringlight-cursor"
+          path="/org/gnome/shell/extensions/ringlight-cursor/">
+    <key name="enabled" type="b">
+      <default>false</default>
+      <summary>Glow is showing</summary>
+    </key>
+    <key name="auto-mode" type="b">
+      <default>true</default>
+      <summary>Turn the glow on and off with the camera</summary>
+    </key>
+    <key name="brightness" type="d">
+      <range min="0.0" max="1.0"/>
+      <default>0.7</default>
+      <summary>Glow brightness</summary>
+    </key>
+    <key name="color-temp" type="d">
+      <range min="0.0" max="1.0"/>
+      <default>0.5</default>
+      <summary>Colour temperature, 0.0 warm amber to 1.0 cool white</summary>
+    </key>
+    <key name="glow-size" type="s">
+      <choices>
+        <choice value="small"/>
+        <choice value="medium"/>
+        <choice value="large"/>
+      </choices>
+      <default>'medium'</default>
+      <summary>How far the glow reaches in from the screen edge</summary>
+    </key>
+    <key name="hole-size" type="s">
+      <choices>
+        <choice value="off"/>
+        <choice value="small"/>
+        <choice value="medium"/>
+        <choice value="large"/>
+      </choices>
+      <default>'medium'</default>
+      <summary>Size of the cut-out that follows the pointer</summary>
+    </key>
+  </schema>
+</schemalist>

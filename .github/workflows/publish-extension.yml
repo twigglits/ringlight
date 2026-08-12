@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "gnome/gnome-extension/**"
+      - "gnome-extension/**"
 
   workflow_dispatch:
 
@@ -14,10 +14,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # extra-source is not optional decoration: the action packs the same set
+      # `gnome-extensions pack` does, so anything beyond extension.js/prefs.js
+      # is silently left out of the zip and the extension breaks on load.
+      # extensions.gnome.org compiles the schema itself, which is why only the
+      # .gschema.xml is listed and gschemas.compiled is not in the repo.
       - name: Package and upload GNOME extension
         uses: murar8/gnome-extensions-action@0.1.0
         with:
-          source-dir: gnome/gnome-extension
+          source-dir: gnome-extension
+          extra-source: |
+            glow.js
+            camera.js
+          schema: schemas/org.gnome.shell.extensions.ringlight-cursor.gschema.xml
           username: ${{ secrets.GNOME_EXTENSIONS_USERNAME }}
           password: ${{ secrets.GNOME_EXTENSIONS_PASSWORD }}
           accept-tos: true

@@ -2,33 +2,26 @@
 
 A desktop ring light overlay. Adds a soft, warm glow around the edges of your screen to simulate a ring light during video calls on Google Meet, Teams, Zoom, etc. Automatically activates when your camera turns on.
 
-Ringlight ships as **two packages**, because the panel integration and the overlay surface have to be written against the desktop you are actually running. Pick the one matching yours — they conflict with each other, and both give you a `ringlight` command.
+Ringlight ships **two ways**, because a screen-edge overlay has to be built against the compositor you are actually running. Pick the one matching your desktop.
 
-| Your desktop | Package | Panel integration |
+| Your desktop | Get it from | Controls |
 |---|---|---|
-| GNOME on Debian/Ubuntu | `ringlight-gnome.deb` | system tray (AppIndicator) |
+| GNOME (Ubuntu, Fedora, Debian…) | [extensions.gnome.org](https://extensions.gnome.org/extension/9483/ringlight-cursor-tracker/) | panel menu + extension settings |
 | COSMIC on Pop!\_OS | `ringlight-cosmic.deb` | cosmic-panel applet |
 
 ## Install
 
-Grab the `.deb` for your desktop from the [latest release](https://github.com/twigglits/ringlight/releases/latest).
+### GNOME
 
-### Debian/Ubuntu (GNOME desktop)
+Install **Ringlight** from [extensions.gnome.org](https://extensions.gnome.org/extension/9483/ringlight-cursor-tracker/), then log out and back in. That is the whole install — there is no package and no binary to run.
 
-```bash
-sudo apt install ./ringlight-gnome.deb
-ringlight
-```
+A lamp icon appears in the top bar. It is on by default whenever an app opens your webcam.
 
-Ringlight appears in the system tray. On first launch it drops a GNOME Shell extension into `~/.local/share/gnome-shell/extensions/` for accurate cursor tracking; enable it once:
-
-```bash
-gnome-extensions enable ringlight-cursor@ringlight
-```
-
-Then log out and back in. Without the extension Ringlight still runs — it falls back to reading `/dev/input`, which needs `input` group membership and only gives relative motion.
+> There is no `.deb` for GNOME, and a GNOME Ringlight that is not the extension will not work. mutter does not implement `zwlr_layer_shell_v1`, and a plain application window cannot be made always-on-top, screen-sized *and* click-through under Wayland — `set_keep_above`, `move()` and the Dock window-type hint are all X11-only no-ops there. Only the shell itself can put that surface on screen, so only an extension can draw the glow.
 
 ### Pop!\_OS (COSMIC desktop)
+
+Grab `ringlight-cosmic.deb` from the [latest release](https://github.com/twigglits/ringlight/releases/latest).
 
 ```bash
 sudo apt install ./ringlight-cosmic.deb
@@ -38,14 +31,12 @@ Then add "Ringlight" to your panel via **Settings → Desktop → Panel → Appl
 
 ## Build from source
 
-Both builds need a Rust toolchain (`rustup` / `cargo`). `cargo deb` produces the same package the release workflow does; plain `cargo build --release` gives you just the binary.
-
 ```bash
 git clone https://github.com/twigglits/ringlight.git
 cd ringlight
 ```
 
-**COSMIC** (repository root):
+**COSMIC** (repository root) needs a Rust toolchain. `cargo deb` produces the same package the release workflow does; plain `cargo build --release` gives you just the binary.
 
 ```bash
 sudo apt install build-essential cmake libexpat1-dev libfontconfig-dev \
@@ -54,14 +45,20 @@ sudo apt install build-essential cmake libexpat1-dev libfontconfig-dev \
 cargo deb                      # or: cargo build --release
 ```
 
-**GNOME** (the `gnome/` subdirectory, a separate crate with its own lockfile):
+**GNOME** (`gnome-extension/`) is JavaScript, so there is nothing to compile — install it in place:
 
 ```bash
-sudo apt install build-essential libgtk-3-dev libgtk-layer-shell-dev libx11-dev pkgconf
-cd gnome && cargo deb
+ln -s "$PWD/gnome-extension" ~/.local/share/gnome-shell/extensions/ringlight-cursor@ringlight
+glib-compile-schemas gnome-extension/schemas/
+gnome-extensions enable ringlight-cursor@ringlight
 ```
 
-The two are deliberately not one workspace: one is GTK3/cairo and the other is libcosmic, so sharing a lockfile would force a single dependency resolution across two unrelated toolkits.
+Log out and back in. GNOME Shell cannot reload an extension mid-session under Wayland, so every change to `extension.js` costs a logout — which is why the two pieces with real logic in them are checkable from a terminal instead:
+
+```bash
+gnome-extension/tools/check-glow.sh          # renders the glow, asserts its shape
+gjs -m gnome-extension/tools/check-camera.js # /proc sweep: correctness and main-loop cost
+```
 
 ## Usage
 
@@ -77,7 +74,7 @@ The two are deliberately not one workspace: one is GTK3/cairo and the other is l
 
 Settings persist across restarts via cosmic-config. To stop the applet, remove it from the panel in COSMIC Settings.
 
-**GNOME**: Ringlight is a system tray icon. Right-click it for Toggle, Auto mode, Brightness up/down, Color temperature and Quit. Settings are in-memory only, so they reset when you quit — cosmic-config is the COSMIC build's persistence layer and has no GNOME equivalent here.
+**GNOME**: Ringlight is a lamp icon in the top bar. Its menu holds the on/off switch, **Follow camera**, and a brightness slider; colour, glow size and the pointer cut-out are under **Settings…** (or `gnome-extensions prefs ringlight-cursor@ringlight`). Everything persists in GSettings.
 
 ## How it works
 
@@ -98,20 +95,23 @@ Settings persist across restarts via cosmic-config. To stop the applet, remove i
 
 ## How the two builds differ
 
-The "How it works" section above describes the COSMIC build. The GNOME build predates it and shares no code — every layer had to be rewritten for COSMIC, which is why they are two packages rather than one binary with a flag:
+The "How it works" section above describes the COSMIC build. The GNOME build shares no code with it: on GNOME the glow is drawn by the shell itself, so there is no process, no toolkit and no Wayland surface of our own anywhere in the picture.
 
-| Component | `ringlight-gnome` | `ringlight-cosmic` |
-|-----------|--------------|----------------|
-| Source | `gnome/` | repository root |
-| GUI toolkit | GTK3 + cairo | libcosmic (iced) |
-| Panel integration | ksni system tray | COSMIC panel applet |
-| Overlay surface | libgtk-layer-shell FFI | iced-sctk layer-shell (one surface) |
-| Glow rendering | cairo gradients + DestOut | WGSL fragment shader over wgpu |
-| Cursor tracking | D-Bus GNOME extension / `/dev/input` | `ext-image-copy-capture-v1` (no permissions) |
-| Settings | in-memory | cosmic-config |
-| Async runtime | glib main loop + threads | tokio + iced subscriptions |
+| Component | GNOME extension | `ringlight-cosmic` |
+|-----------|-----------------|----------------|
+| Source | `gnome-extension/` | repository root |
+| Language | JavaScript (GJS) | Rust |
+| Runs in | the compositor | its own process |
+| Panel integration | `PanelMenu.Button` | COSMIC panel applet |
+| Overlay surface | shell chrome, `affectsInputRegion: false` | iced-sctk layer-shell (one surface) |
+| Glow rendering | cairo gradients + `DEST_OUT` on a `St.DrawingArea` | WGSL fragment shader over wgpu |
+| Cursor tracking | `global.get_pointer()` | `ext-image-copy-capture-v1` (no permissions) |
+| Camera detection | `/proc` sweep, sliced across idle callbacks | `/proc` sweep on a worker thread |
+| Settings | GSettings | cosmic-config |
 
-The GNOME build bundles its Shell extension from `gnome/gnome-extension/` at compile time and writes it out on first run; that extension is also published to [extensions.gnome.org](https://extensions.gnome.org/) as `ringlight-cursor@ringlight`. The COSMIC build needs no extension.
+Both draw the same glow: five stacked edge gradients, each wider and dimmer than the last, with a radial `DEST_OUT` cut-out at the pointer. Sizes are fractions of the smaller screen dimension in both, so a display's resolution and scale factor do not change how the glow looks.
+
+The split is forced, not stylistic. cosmic-comp implements `zwlr_layer_shell_v1` and mutter does not, and mutter will not honour the X11-era escape hatches (`set_keep_above`, window positioning, the Dock type hint) that the glow would otherwise need. Under GNOME the only code that can put a click-through, always-on-top, screen-sized surface up is code running inside the shell.
 
 ## License
 

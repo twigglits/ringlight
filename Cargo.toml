@@ -40,6 +40,8 @@ maintainer = "Jean Naude"
 # Ubuntu and Debian COSMIC repos would fail the install outright.
 depends = "$auto"
 recommends = "cosmic-panel"
+# ringlight-gnome is retired but still sits in old GitHub releases, and it ships
+# the same /usr/bin/ringlight, so the conflict has to outlive it.
 conflicts = "ringlight-gnome"
 provides = "ringlight"
 section = "utils"
@@ -48,7 +50,9 @@ extended-description = """\
 Adds a soft warm glow around the edges of your screen to act as a ring light \
 during video calls, and turns itself on when your webcam does. This is the \
 COSMIC build: a cosmic-panel applet driving a Wayland layer-shell overlay \
-rendered on the GPU. For GNOME install ringlight-gnome instead."""
+rendered on the GPU. On GNOME, install the Ringlight extension from \
+extensions.gnome.org instead - mutter has no layer-shell, so the glow has to \
+be drawn by a shell extension there."""
 assets = [
     ["target/release/ringlight", "usr/bin/", "755"],
     ["ringlight.desktop", "usr/share/applications/", "644"],

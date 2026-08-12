@@ -1,7 +1,0 @@
-{
-  "uuid": "ringlight-cursor@ringlight",
-  "name": "Ringlight Cursor Tracker",
-  "description": "Adds graphical Ringlight when your camera turns on. This is so that your face is illuminated in low light conditions.",
-  "shell-version": ["45", "46", "47"],
-  "version": 1
-}
