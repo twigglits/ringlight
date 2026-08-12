@@ -29,15 +29,5 @@
       <default>'medium'</default>
       <summary>How far the glow reaches in from the screen edge</summary>
     </key>
-    <key name="hole-size" type="s">
-      <choices>
-        <choice value="off"/>
-        <choice value="small"/>
-        <choice value="medium"/>
-        <choice value="large"/>
-      </choices>
-      <default>'medium'</default>
-      <summary>Size of the cut-out that follows the pointer</summary>
-    </key>
   </schema>
 </schemalist>

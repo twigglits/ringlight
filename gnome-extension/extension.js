@@ -1,4 +1,3 @@
-import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 
@@ -11,8 +10,13 @@ import {Slider} from 'resource:///org/gnome/shell/ui/slider.js';
 import {CameraWatcher} from './camera.js';
 import {drawGlow} from './glow.js';
 
-const CURSOR_POLL_MS = 50;
-const CURSOR_EPSILON = 2;
+// The glow is painted onto a surface this many pixels on its long side and the
+// actor is scaled up to fill the monitor. Cairo is a software rasteriser and
+// this runs inside the compositor: a full 2560x1600 repaint measures 67ms, four
+// frame budgets. At 512 it is under a millisecond, and the scale-up costs at
+// most 0.016 of alpha against a full-size render, because every gradient here
+// is far smoother than the pixel grid.
+const RENDER_MAX = 512;
 
 const Indicator = GObject.registerClass(
 class RinglightIndicator extends PanelMenu.Button {
@@ -75,7 +79,6 @@ class RinglightIndicator extends PanelMenu.Button {
 export default class RinglightExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
-        this._mouse = [null, null];
 
         // A layer-shell surface is not an option here: mutter does not
         // implement zwlr_layer_shell_v1 and a plain toplevel cannot be
@@ -96,15 +99,21 @@ export default class RinglightExtension extends Extension {
             if (this._settings.get_boolean('auto-mode'))
                 this._settings.set_boolean('enabled', active);
         });
-        this._camera.start();
+        if (this._settings.get_boolean('auto-mode'))
+            this._camera.start();
 
         this._settingsId = this._settings.connect('changed', () => this._apply());
         // Switching auto-mode on has to pick up a camera that is already in
         // use, or the glow waits for the next flip — which on first run means
-        // it looks broken.
+        // it looks broken. Switching it off stops the /proc sweeps entirely:
+        // nothing is watching the answer.
         this._autoId = this._settings.connect('changed::auto-mode', () => {
-            if (this._settings.get_boolean('auto-mode'))
+            if (this._settings.get_boolean('auto-mode')) {
+                this._camera.start();
                 this._settings.set_boolean('enabled', this._camera.active);
+            } else {
+                this._camera.stop();
+            }
         });
         this._monitorsId = Main.layoutManager.connect('monitors-changed',
             () => this._resize());
@@ -114,10 +123,6 @@ export default class RinglightExtension extends Extension {
     }
 
     disable() {
-        if (this._cursorId)
-            GLib.Source.remove(this._cursorId);
-        this._cursorId = 0;
-
         // Signals first: their handlers reach for the camera watcher and the
         // actor, both of which are about to stop existing.
         if (this._settingsId)
@@ -153,55 +158,36 @@ export default class RinglightExtension extends Extension {
         const monitor = Main.layoutManager.primaryMonitor;
         if (!monitor || !this._area)
             return;
-        this._monitor = monitor;
+
+        // Paint small, let the GPU stretch it. See RENDER_MAX.
+        const k = Math.min(1, RENDER_MAX / Math.max(monitor.width, monitor.height));
+        const w = Math.max(2, Math.round(monitor.width * k));
+        const h = Math.max(2, Math.round(monitor.height * k));
+
         this._area.set_position(monitor.x, monitor.y);
-        this._area.set_size(monitor.width, monitor.height);
+        this._area.set_size(w, h);
+        this._area.set_scale(monitor.width / w, monitor.height / h);
         this._area.queue_repaint();
     }
 
     _apply() {
-        const on = this._settings.get_boolean('enabled');
-        this._area.visible = on;
-
-        const wantsCursor = on && this._settings.get_string('hole-size') !== 'off';
-        if (wantsCursor && !this._cursorId) {
-            this._cursorId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, CURSOR_POLL_MS,
-                () => this._trackCursor());
-        } else if (!wantsCursor && this._cursorId) {
-            GLib.Source.remove(this._cursorId);
-            this._cursorId = 0;
-            this._mouse = [null, null];
-        }
-
+        this._area.visible = this._settings.get_boolean('enabled');
         this._area.queue_repaint();
     }
 
-    _trackCursor() {
-        if (!this._monitor)
-            return GLib.SOURCE_CONTINUE;
-        const [x, y] = global.get_pointer();
-        const mx = x - this._monitor.x;
-        const my = y - this._monitor.y;
-        const [px, py] = this._mouse;
-        if (px === null ||
-            Math.abs(px - mx) > CURSOR_EPSILON || Math.abs(py - my) > CURSOR_EPSILON) {
-            this._mouse = [mx, my];
-            this._area.queue_repaint();
-        }
-        return GLib.SOURCE_CONTINUE;
-    }
-
+    // Only ever runs on a settings change, a monitor change, or the first show.
+    // Nothing in the glow follows the pointer or a clock, so there is no
+    // repaint to schedule and no timer to leave running.
     _repaint() {
         const cr = this._area.get_context();
         const [width, height] = this._area.get_surface_size();
         try {
+            if (width < 1 || height < 1)
+                return;
             drawGlow(cr, width, height, {
                 brightness: this._settings.get_double('brightness'),
                 colorTemp: this._settings.get_double('color-temp'),
                 glowSize: this._settings.get_string('glow-size'),
-                holeSize: this._settings.get_string('hole-size'),
-                mouseX: this._mouse[0],
-                mouseY: this._mouse[1],
             });
         } finally {
             cr.$dispose();
