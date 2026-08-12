@@ -74,7 +74,7 @@ gjs -m gnome-extension/tools/check-camera.js # /proc sweep: correctness and main
 
 Settings persist across restarts via cosmic-config. To stop the applet, remove it from the panel in COSMIC Settings.
 
-**GNOME**: Ringlight is a lamp icon in the top bar. Its menu holds the on/off switch, **Follow camera**, and a brightness slider; colour, glow size and the pointer cut-out are under **Settings…** (or `gnome-extensions prefs ringlight-cursor@ringlight`). Everything persists in GSettings.
+**GNOME**: Ringlight is a lamp icon in the top bar. Its menu holds the on/off switch, **Follow camera**, and a brightness slider; colour and glow size are under **Settings…** (or `gnome-extensions prefs ringlight-cursor@ringlight`). Everything persists in GSettings.
 
 ## How it works
 
@@ -109,7 +109,7 @@ The "How it works" section above describes the COSMIC build. The GNOME build sha
 | Camera detection | `/proc` sweep, sliced across idle callbacks | `/proc` sweep on a worker thread |
 | Settings | GSettings | cosmic-config |
 
-Both draw the same glow: five stacked edge gradients, each wider and dimmer than the last, with a radial `DEST_OUT` cut-out at the pointer. Sizes are fractions of the smaller screen dimension in both, so a display's resolution and scale factor do not change how the glow looks.
+Both draw the same glow: five stacked edge gradients, each wider and dimmer than the last. Sizes are fractions of the smaller screen dimension in both, so a display's resolution and scale factor do not change how the glow looks. The COSMIC build also cuts a hole in the glow at the pointer; the GNOME one does not, because there it would have to be redrawn by the compositor on every pointer move.
 
 The split is forced, not stylistic. cosmic-comp implements `zwlr_layer_shell_v1` and mutter does not, and mutter will not honour the X11-era escape hatches (`set_keep_above`, window positioning, the Dock type hint) that the glow would otherwise need. Under GNOME the only code that can put a click-through, always-on-top, screen-sized surface up is code running inside the shell.
 

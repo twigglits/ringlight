@@ -260,6 +260,75 @@ compositor. That is the only route on GNOME.
 `trackFullscreen` is deliberately `false`: a fullscreen video call is exactly
 when the light is wanted.
 
+### The shell does no recurring work — this is the whole design
+
+The published EGO v4 (`pk 73938`, 43 lines, identical to commit `5200204`) has
+no actor, no timer and no repaint handler at all: it exports one D-Bus
+`GetPosition` and the Rust binary drew the glow. It could not light anything on
+GNOME Wayland, but it never cost a frame either. **That is the constraint this
+build now keeps: nothing in the shell runs on a clock or on pointer motion.**
+
+The first shell-drawn version broke it and made the machine crawl, pointer
+included. Timing the `repaint` handler inside a real GNOME Shell 46 on a
+2560x1600 monitor while the pointer swept an edge for 10s:
+
+| | repaints in 10s | mean repaint | main loop spent painting |
+|---|---|---|---|
+| full-size surface, pointer cut-out | 50 | **67.66ms** | 3.38s of 10s |
+| 512px surface, cached glow, clipped cut-out | 200+ | 0.25ms | 0.05s |
+| **now: static glow, no cut-out** | **0** | 0.54ms (startup only) | ~0 |
+
+67ms is four frame budgets, and mutter moves the pointer on that same loop —
+hence the lag. Note the middle row: even at 0.25ms it is still 200 repaints and
+200 texture uploads that buy nothing the user asked for. The fix that holds is
+not a faster repaint, it is **no repaint**. Whole-process CPU while sweeping the
+pointer, same harness: 24.0% with the glow off, 24.4% with it on.
+
+What that costs and what it bought:
+
+- **The pointer cut-out is gone**, along with `hole-size`, the 20Hz
+  `global.get_pointer()` timer and every repaint. It was the only thing in the
+  extension that changed while the glow was up. Putting it back means putting
+  the timer back; do not, unless someone measures a version that does not.
+- **Scale the actor, don't paint big.** The surface is 512px on its long side
+  (`RENDER_MAX`) and the actor is scaled to the monitor. Verified in a headless
+  shell: a 512x320 surface reports `transformed=1280x800+0+0` on a 1280x800
+  monitor. Against a full-size render the upscale costs a *max* alpha error of
+  0.016 (mean 0.001), because every gradient here is far smoother than the pixel
+  grid. This matters less now that repaints are rare, but it keeps a settings
+  change to half a millisecond instead of 67, which is what a slider drag needs.
+  Measure the error with clamp-to-edge sampling (`Cairo.Extend.PAD`), which is
+  what Cogl does — cairo's default `NONE` blends the border with transparent
+  black and reports a fake 0.64 error at the corners.
+- **`glow.js` takes no pointer state.** Nothing it draws can change while the
+  glow is up, which is what makes "paint once" safe rather than a bug waiting to
+  happen.
+
+The one recurring cost left in the shell is the camera sweep, and it only runs
+when `auto-mode` is on. `/proc/<pid>/fd` mtime does *not* change when a process
+opens an fd (measured), so there is no cheap way to skip the sweep — the slicing
+below is the mitigation.
+
+To re-measure any of this without logging out, drive the pointer through
+Mutter's own API — `org.gnome.Mutter.RemoteDesktop`, `CreateSession` then
+`Session.NotifyPointerMotionRelative` (*not* `NotifyPointerMotion`, which does
+not exist). Two traps:
+
+- **A headless shell does not paint** unless something consumes the frames, and
+  a shell that is not painting makes any renderer look fast. Tell it apart by
+  changing the virtual monitor size: real painting scales with it. Start a
+  consumer with `org.gnome.Shell.Screencast.Screencast`.
+- Even then, headless runs on llvmpipe, so whole-process CPU is dominated by
+  software compositing and is ±4 points run to run — the old and new code came
+  out 27.6% vs 26.5%, which says nothing. Time the `repaint` handler itself and
+  `console.log` it instead; that is the number above.
+- **`dbus-run-session` starts a second `dconf-service` against the same
+  `~/.config/dconf/user`.** After a few nested runs the session's own service is
+  desynced: `dconf write` reports success, `dconf read` returns the old value and
+  `dconf watch` shows nothing. It is not the extension writing settings back.
+  `pkill -f libexec/dconf-service` (it is D-Bus activated, nothing is lost) and
+  the writes land again.
+
 ### Camera detection is a sliced /proc sweep
 
 `Shell.CameraMonitor` exists and exposes `cameras-in-use`, and it is the wrong
@@ -294,6 +363,21 @@ gnome-extension/tools/check-glow.sh            # samples a rendered PNG against 
 gjs -m gnome-extension/tools/check-camera.js   # sweep correctness + main-loop cost
 gjs -m gnome-extension/tools/render-glow.js /tmp/g.png   # eyeball it
 ```
+
+A **headless shell does load the extension**, which the checks above cannot:
+
+```bash
+dbus-run-session -- bash -c 'gnome-shell --headless --virtual-monitor 1280x800 >/tmp/shell.log 2>&1 &
+  sleep 18; gnome-extensions info ringlight-cursor@ringlight; kill %1'
+```
+
+`State: ACTIVE` and no `JS ERROR` in `/tmp/shell.log` covers everything up to
+pixels: `enable()`, the settings and monitor signals, the camera watcher. It
+reads `~/.local/share/...`, not the repo, so install first. Screenshots are not
+available (`org.gnome.Shell.Screenshot` answers `AccessDenied` to plain D-Bus
+callers), so to check geometry, `console.log` it from the extension — that lands
+in the shell log, and is how the scaled overlay was confirmed to cover the
+monitor.
 
 `glow.js` imports nothing from the shell purely so this stays possible. Keep it
 that way. For syntax, `node --input-type=module --check < file.js` parses GJS
@@ -372,6 +456,7 @@ use cosmic::cosmic_config::CosmicConfigEntry;
 - **Click-through is fixed and confirmed** on the two-process design: clicks, drags and window moves all work with the glow on. The single-process applet version swallowed every click; see "Why the overlay is a separate process"
 - The COSMIC `.deb` builds and passes `apt-get install -s`; `dpkg-deb -c` shows binary, desktop entry and licence in the right places. It has never been runtime-tested as an installed package, only built and simulated
 - **This machine now runs Ubuntu GNOME, not COSMIC** (`XDG_CURRENT_DESKTOP=ubuntu:GNOME`, no `cosmic-*` in apt). The COSMIC runtime measurements above were taken when it ran Pop!_OS COSMIC and **cannot be re-run here** — the screenshot/alpha-sampling recipes need cosmic-comp. The GNOME half is the testable one now
-- **GNOME extension**: `check-glow.sh` passes — measured alpha tracks the shader maths to 0.002 at the falloff band, edges reach 1.0, interior and pointer cut-out are 0.0. `check-camera.js` passes, including the main-loop-stall bound. Both were run on GNOME Shell 46. What is *not* verified is the extension actually loading: that needs a logout, and no webcam was attached to this machine to exercise auto-mode end to end. `journalctl -f -o cat /usr/bin/gnome-shell` is where a load failure would show
+- **GNOME extension**: `check-glow.sh` passes — measured alpha tracks the shader maths to 0.002 at the falloff band, edges reach 1.0 and the interior is 0.0. `check-camera.js` passes, including the main-loop-stall bound. It loads `State: ACTIVE` with no JS errors in a headless GNOME Shell 46, through enable/disable and auto-mode toggles, and the scaled overlay was confirmed there to transform to exactly the monitor rectangle. No webcam was attached to this machine, so auto-mode is not verified end to end; `journalctl -f -o cat /usr/bin/gnome-shell` is where a load failure in a real session would show
+- **The first shell-drawn version made the whole desktop crawl**, pointer included: 67.66ms of main-loop work per pointer step. The glow is now painted once and never repainted while it is up — 0 repaints during 10s of pointer motion, and whole-process CPU indistinguishable from the glow being off. See "The shell does no recurring work". The pointer cut-out was dropped to get there
 - The EGO listing is id 9483, `ringlight-cursor@ringlight`, serving version 4 at the time of the rewrite
 - Design and plan: `docs/superpowers/specs/` and `docs/superpowers/plans/`

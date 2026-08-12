@@ -5,7 +5,6 @@ import Gtk from 'gi://Gtk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 const GLOW_SIZES = ['small', 'medium', 'large'];
-const HOLE_SIZES = ['off', 'small', 'medium', 'large'];
 
 function scaleRow(group, title, subtitle, settings, key) {
     const row = new Adw.ActionRow({title, subtitle});
@@ -50,8 +49,6 @@ export default class RinglightPreferences extends ExtensionPreferences {
         const shape = new Adw.PreferencesGroup({title: 'Shape'});
         choiceRow(shape, 'Glow size', 'How far the glow reaches in from the edge',
             ['Small', 'Medium', 'Large'], GLOW_SIZES, settings, 'glow-size');
-        choiceRow(shape, 'Pointer cut-out', 'Clears the glow around the pointer',
-            ['Off', 'Small', 'Medium', 'Large'], HOLE_SIZES, settings, 'hole-size');
         page.add(shape);
 
         window.add(page);

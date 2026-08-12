@@ -81,6 +81,7 @@ export class CameraWatcher {
         this._active = false;
         this._pollId = 0;
         this._idleId = 0;
+        this._holder = null;
     }
 
     get active() {
@@ -88,6 +89,8 @@ export class CameraWatcher {
     }
 
     start() {
+        if (this._pollId)
+            return;
         this._poll();
         this._pollId = GLib.timeout_add_seconds(GLib.PRIORITY_LOW, POLL_SECONDS, () => {
             this._poll();
@@ -95,13 +98,19 @@ export class CameraWatcher {
         });
     }
 
-    destroy() {
+    stop() {
         if (this._pollId)
             GLib.Source.remove(this._pollId);
         if (this._idleId)
             GLib.Source.remove(this._idleId);
         this._pollId = 0;
         this._idleId = 0;
+        this._holder = null;
+        this._active = false;
+    }
+
+    destroy() {
+        this.stop();
         this._onChange = null;
     }
 
@@ -112,8 +121,19 @@ export class CameraWatcher {
         // Re-detected every poll so a camera plugged in later is picked up.
         const devices = this._devicesFn();
         if (devices.length === 0) {
+            this._holder = null;
             this._report(false);
             return;
+        }
+
+        // While a call is running the answer is already known: check the one
+        // process that had the camera before sweeping every process again.
+        if (this._holder !== null) {
+            if (pidHoldsDevice(this._holder, devices)) {
+                this._report(true);
+                return;
+            }
+            this._holder = null;
         }
 
         // Listing /proc is itself up to ~4ms with a cold dentry cache, so it
@@ -127,8 +147,10 @@ export class CameraWatcher {
                 return GLib.SOURCE_CONTINUE;
             }
             while (i < pids.length) {
-                if (pidHoldsDevice(pids[i++], devices)) {
+                const pid = pids[i++];
+                if (pidHoldsDevice(pid, devices)) {
                     this._idleId = 0;
+                    this._holder = pid;
                     this._report(true);
                     return GLib.SOURCE_REMOVE;
                 }

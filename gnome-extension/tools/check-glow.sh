@@ -5,8 +5,7 @@
 #
 #   gnome-extension/tools/check-glow.sh
 #
-# Needs gjs and ImageMagick. Sample points avoid x=640..960, which the pointer
-# cut-out covers in the rendered frame.
+# Needs gjs and ImageMagick.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,9 +40,10 @@ expect "corner"            0    0 0.999 0.01
 # One base-width in from the top: pass 0 has fallen to zero, the four wider
 # passes have not.
 expect "falloff at width"  200 100 0.637 0.02
-# Interior is untouched, and the pointer cut-out erases what it covers.
+# Interior is untouched, and the widest pass reaches twice the base width.
 expect "interior"          200 500 0.000 0.005
-expect "pointer cut-out"   800  60 0.000 0.005
+expect "widest pass"       200 180 0.051 0.02
+expect "past widest pass"  200 210 0.000 0.005
 
 if [ "$fails" -ne 0 ]; then
     echo "$fails check(s) failed"

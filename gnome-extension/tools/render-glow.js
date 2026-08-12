@@ -20,9 +20,6 @@ drawGlow(cr, WIDTH, HEIGHT, {
     brightness: 1.0,
     colorTemp: 0.5,
     glowSize: 'medium',
-    holeSize: 'medium',
-    mouseX: WIDTH / 2,
-    mouseY: 60,
 });
 
 cr.$dispose();
