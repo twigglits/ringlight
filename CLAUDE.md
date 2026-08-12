@@ -4,6 +4,12 @@
 
 Desktop ring light overlay for Pop!_OS on the COSMIC desktop (System76). Adds a warm glow around screen edges during video calls, with automatic camera detection.
 
+**Two crates, two `.deb` packages.** The repository root is the COSMIC build
+(`ringlight-cosmic`). `gnome/` is a separate crate for the GNOME build
+(`ringlight-gnome`) — GTK3/cairo/ksni, restored from the pre-COSMIC history at
+`649dec7`. Everything below documents the COSMIC crate unless it says otherwise.
+See "Packaging" for how the two are built and released.
+
 ## Tech stack
 
 - **Language**: Rust (edition 2021)
@@ -104,6 +110,49 @@ cargo test --bins          # note: --bins, the crate has no lib target
 
 Requires Rust stable (1.94+). libcosmic is pulled from `https://github.com/pop-os/libcosmic.git`. First build downloads ~649 crates and takes several minutes.
 
+The GNOME crate is built separately and needs a different dep set:
+
+```bash
+sudo apt install -y build-essential libgtk-3-dev libgtk-layer-shell-dev libx11-dev pkgconf
+cd gnome && cargo build --release      # ~45s, no tests in this crate
+```
+
+## Packaging
+
+Two `.deb`s, one per desktop, both via `cargo deb` (`cargo install cargo-deb`):
+
+```bash
+cargo deb                    # → target/debian/ringlight-cosmic_<ver>-1_amd64.deb
+cd gnome && cargo deb        # → gnome/target/debian/ringlight-gnome_<ver>-1_amd64.deb
+```
+
+`.github/workflows/release.yml` builds both on a `v*` tag (matrix over the two
+crates, differing apt deps and working dirs) and attaches them to one GitHub
+release. `cargo deb --output` there is given an absolute `$GITHUB_WORKSPACE`
+path because `matrix.dir` is `.` for one entry — a relative `../` would escape
+the workspace.
+
+Facts worth not rediscovering:
+
+- **`gnome/Cargo.toml` has an empty `[workspace]` table.** Without it Cargo
+  errors ("current package believes it's in a workspace when it's not") because
+  the crate is nested under the root package's directory. It is deliberately not
+  a workspace member: unifying GTK3 and libcosmic resolution in one lockfile has
+  no upside.
+- **Both packages ship `/usr/bin/ringlight`**, declare `Provides: ringlight`,
+  and `Conflicts:` each other, so only one is installable at a time and the
+  command name is the same either way. Renaming the binaries per-package instead
+  would break every `Exec=ringlight` desktop entry.
+- **`cosmic-panel` is `recommends`, not `depends`.** The applet is useless
+  without it, but its package name is not verifiable across Pop!_OS / Ubuntu /
+  Debian COSMIC repos, and a wrong `Depends` fails the install outright. Promote
+  it to `depends` only after confirming the name on a live COSMIC repo.
+- **Version lives in two `Cargo.toml`s** (root and `gnome/`) and must be bumped
+  in both, plus `version` in `gnome/gnome-extension/metadata.json` when
+  resubmitting the extension.
+- Verify a built package without installing it:
+  `apt-get install -s ./path/to.deb` (simulate) and `dpkg-deb -I/-c`.
+
 ## Install as COSMIC panel applet
 
 ```bash
@@ -175,7 +224,7 @@ white the display out completely.
 - **Overlay in a child process**: not a style choice — an applet's Wayland connection comes from cosmic-panel and does not honour an empty input region, so an in-process overlay swallows every click. See "Why the overlay is a separate process"
 - **Child lifetime tied to a pipe, not a pid**: the child exits on stdin EOF, so a `pkill`ed or crashed applet cannot leave a full-screen surface stranded with no way to dismiss it. cosmic-panel SIGKILLs applets (exit 137), so this path is routine, not hypothetical
 - **The applet no longer tracks the cursor**: only the glow needs it, and doing it in the child saves the applet a Wayland connection
-- **`gnome-extension/` retained**: for reference; not used by the COSMIC build
+- **`gnome/gnome-extension/` is live, not reference**: the GNOME crate `include_str!`s it at compile time and writes it to `~/.local/share/gnome-shell/extensions/` on first run, and `publish-extension.yml` uploads it to extensions.gnome.org. The COSMIC build does not use it. Its `uuid` (`ringlight-cursor@ringlight`) is the extensions.gnome.org identity — changing it makes a resubmission a brand-new listing instead of a new version, so leave it alone and bump `version` instead
 
 ## Verified libcosmic import paths (as of 2026-08-06)
 
@@ -224,4 +273,7 @@ use cosmic::cosmic_config::CosmicConfigEntry;
 - Compiles clean; `cargo clippy --all-targets` clean; 24 unit tests pass
 - Runtime-verified on Pop!_OS 24.04 COSMIC, originally on eDP-1 (3000x2000 @ 200%) and re-verified on DP-1 (3440x1440): glow falloff, corner uniformity, cursor-hole alignment and settings persistence were all confirmed by sampling screenshots against the shader maths, not by eye. Measured alpha tracks the shader to a mean error of ~0.01–0.03 across the falloff band, with all four edges agreeing
 - **Click-through is fixed and confirmed** on the two-process design: clicks, drags and window moves all work with the glow on. The single-process applet version swallowed every click; see "Why the overlay is a separate process"
+- Both `.deb`s build and pass `apt-get install -s`; `dpkg-deb -c` shows binary, desktop entry and licence in the right places. The GNOME crate builds with zero warnings
+- **This machine now runs Ubuntu GNOME, not COSMIC** (`XDG_CURRENT_DESKTOP=ubuntu:GNOME`, no `cosmic-*` in apt). The COSMIC runtime measurements above were taken when it ran Pop!_OS COSMIC and **cannot be re-run here** — the screenshot/alpha-sampling recipes below need cosmic-comp. The GNOME half is the testable one now
+- Neither `.deb` has been runtime-tested as an installed package, only built and simulated
 - Design and plan: `docs/superpowers/specs/` and `docs/superpowers/plans/`

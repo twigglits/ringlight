@@ -1,46 +1,71 @@
 # Ringlight
 
-A desktop ring light overlay for Pop!\_OS on the COSMIC desktop. Adds a soft, warm glow around the edges of your screen to simulate a ring light during video calls on Google Meet, Teams, Zoom, etc. Automatically activates when your camera turns on.
+A desktop ring light overlay. Adds a soft, warm glow around the edges of your screen to simulate a ring light during video calls on Google Meet, Teams, Zoom, etc. Automatically activates when your camera turns on.
 
-## Requirements
+Ringlight ships as **two packages**, because the panel integration and the overlay surface have to be written against the desktop you are actually running. Pick the one matching yours — they conflict with each other, and both give you a `ringlight` command.
 
-- Pop!\_OS with COSMIC desktop (or any distro running cosmic-comp)
-- Rust toolchain (`rustup` / `cargo`)
-- System libraries for libcosmic (Wayland, etc.)
+| Your desktop | Package | Panel integration |
+|---|---|---|
+| GNOME on Debian/Ubuntu | `ringlight-gnome.deb` | system tray (AppIndicator) |
+| COSMIC on Pop!\_OS | `ringlight-cosmic.deb` | cosmic-panel applet |
+
+## Install
+
+Grab the `.deb` for your desktop from the [latest release](https://github.com/twigglits/ringlight/releases/latest).
+
+### Debian/Ubuntu (GNOME desktop)
 
 ```bash
-sudo apt install libwayland-dev libxkbcommon-dev pkg-config libinput-dev
+sudo apt install ./ringlight-gnome.deb
+ringlight
 ```
 
-> The exact system packages depend on your distro. libcosmic pulls most dependencies through Cargo, but a working Wayland development environment is required.
+Ringlight appears in the system tray. On first launch it drops a GNOME Shell extension into `~/.local/share/gnome-shell/extensions/` for accurate cursor tracking; enable it once:
 
-## Build & Install
+```bash
+gnome-extensions enable ringlight-cursor@ringlight
+```
+
+Then log out and back in. Without the extension Ringlight still runs — it falls back to reading `/dev/input`, which needs `input` group membership and only gives relative motion.
+
+### Pop!\_OS (COSMIC desktop)
+
+```bash
+sudo apt install ./ringlight-cosmic.deb
+```
+
+Then add "Ringlight" to your panel via **Settings → Desktop → Panel → Applets**. No extension and no permissions are needed; cursor position comes from the compositor.
+
+## Build from source
+
+Both builds need a Rust toolchain (`rustup` / `cargo`). `cargo deb` produces the same package the release workflow does; plain `cargo build --release` gives you just the binary.
 
 ```bash
 git clone https://github.com/twigglits/ringlight.git
 cd ringlight
-cargo build --release
 ```
 
-The binary is at `target/release/ringlight`. Copy it somewhere on your `$PATH`:
+**COSMIC** (repository root):
 
 ```bash
-sudo cp target/release/ringlight /usr/local/bin/
+sudo apt install build-essential cmake libexpat1-dev libfontconfig-dev \
+  libfreetype-dev libxkbcommon-dev libwayland-dev libdbus-1-dev \
+  libssl-dev libgbm-dev libpipewire-0.3-dev libpulse-dev pkgconf
+cargo deb                      # or: cargo build --release
 ```
 
-### Register as a COSMIC panel applet
-
-Copy the desktop entry so COSMIC discovers the applet:
+**GNOME** (the `gnome/` subdirectory, a separate crate with its own lockfile):
 
 ```bash
-sudo cp ringlight.desktop /usr/share/applications/
+sudo apt install build-essential libgtk-3-dev libgtk-layer-shell-dev libx11-dev pkgconf
+cd gnome && cargo deb
 ```
 
-Then add "Ringlight" to your COSMIC panel via **Settings → Desktop → Panel → Applets**.
+The two are deliberately not one workspace: one is GTK3/cairo and the other is libcosmic, so sharing a lockfile would force a single dependency resolution across two unrelated toolkits.
 
 ## Usage
 
-Ringlight appears as an icon in the COSMIC panel. Click it to open the controls popup:
+**COSMIC**: Ringlight is an icon in the COSMIC panel. Click it for the controls popup:
 
 - **Enabled** — toggle the ring light on/off
 - **Auto (camera)** — automatically enable when a webcam is in use
@@ -51,6 +76,8 @@ Ringlight appears as an icon in the COSMIC panel. Click it to open the controls 
 - **Presets** — Warm, Cool, Subtle, Bright
 
 Settings persist across restarts via cosmic-config. To stop the applet, remove it from the panel in COSMIC Settings.
+
+**GNOME**: Ringlight is a system tray icon. Right-click it for Toggle, Auto mode, Brightness up/down, Color temperature and Quit. Settings are in-memory only, so they reset when you quit — cosmic-config is the COSMIC build's persistence layer and has no GNOME equivalent here.
 
 ## How it works
 
@@ -69,12 +96,13 @@ Settings persist across restarts via cosmic-config. To stop the applet, remove i
 
 - **Glow size**: Expressed as a fraction of the smaller screen dimension rather than a fixed pixel count, so it looks the same on any display or scale factor.
 
-## Architecture (COSMIC port)
+## How the two builds differ
 
-The original GNOME/GTK3 version used cairo rendering, a ksni system tray, libgtk-layer-shell FFI, and a bundled GNOME Shell extension for cursor tracking. The COSMIC port replaces all of these:
+The "How it works" section above describes the COSMIC build. The GNOME build predates it and shares no code — every layer had to be rewritten for COSMIC, which is why they are two packages rather than one binary with a flag:
 
-| Component | GNOME version | COSMIC version |
+| Component | `ringlight-gnome` | `ringlight-cosmic` |
 |-----------|--------------|----------------|
+| Source | `gnome/` | repository root |
 | GUI toolkit | GTK3 + cairo | libcosmic (iced) |
 | Panel integration | ksni system tray | COSMIC panel applet |
 | Overlay surface | libgtk-layer-shell FFI | iced-sctk layer-shell (one surface) |
@@ -83,7 +111,7 @@ The original GNOME/GTK3 version used cairo rendering, a ksni system tray, libgtk
 | Settings | in-memory | cosmic-config |
 | Async runtime | glib main loop + threads | tokio + iced subscriptions |
 
-The bundled `gnome-extension/` directory is retained for reference but is not used by the COSMIC build.
+The GNOME build bundles its Shell extension from `gnome/gnome-extension/` at compile time and writes it out on first run; that extension is also published to [extensions.gnome.org](https://extensions.gnome.org/) as `ringlight-cursor@ringlight`. The COSMIC build needs no extension.
 
 ## License
 

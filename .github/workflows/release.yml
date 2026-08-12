@@ -1,0 +1,76 @@
+name: Release
+
+# Two .deb packages per tag: one for GNOME (Debian/Ubuntu), one for COSMIC
+# (Pop!_OS). They are separate crates under separate lockfiles because one is
+# GTK3 and the other is libcosmic, so each gets its own build here.
+on:
+  push:
+    tags: ["v*"]
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deb:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - desktop: gnome
+            dir: gnome
+            apt: libgtk-3-dev libgtk-layer-shell-dev libx11-dev
+          - desktop: cosmic
+            dir: .
+            apt: >-
+              cmake libexpat1-dev libfontconfig-dev libfreetype-dev
+              libxkbcommon-dev libwayland-dev libdbus-1-dev libssl-dev
+              libgbm-dev libpipewire-0.3-dev libpulse-dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ${{ matrix.apt }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+
+      # Absolute output path: matrix.dir is the repo root for one entry and a
+      # subdirectory for the other, so a relative path would land outside the
+      # workspace in the first case.
+      - name: Build package
+        working-directory: ${{ matrix.dir }}
+        run: cargo deb --output "$GITHUB_WORKSPACE/ringlight-${{ matrix.desktop }}.deb"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.desktop }}
+          path: ringlight-${{ matrix.desktop }}.deb
+          if-no-files-found: error
+
+  release:
+    needs: deb
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: deb-*
+          merge-multiple: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Ringlight $GITHUB_REF_NAME" \
+            --generate-notes \
+            ringlight-gnome.deb#"Debian/Ubuntu (GNOME desktop)" \
+            ringlight-cosmic.deb#"Pop!_OS (COSMIC desktop)"

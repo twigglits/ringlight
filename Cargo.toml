@@ -31,3 +31,26 @@ features = [
     "tokio",
     "wgpu",
 ]
+
+[package.metadata.deb]
+name = "ringlight-cosmic"
+maintainer = "Jean Naude"
+# cosmic-panel is Recommends, not Depends: without it the applet has nothing to
+# load it, but hard-depending on a package name that differs across Pop!_OS,
+# Ubuntu and Debian COSMIC repos would fail the install outright.
+depends = "$auto"
+recommends = "cosmic-panel"
+conflicts = "ringlight-gnome"
+provides = "ringlight"
+section = "utils"
+priority = "optional"
+extended-description = """\
+Adds a soft warm glow around the edges of your screen to act as a ring light \
+during video calls, and turns itself on when your webcam does. This is the \
+COSMIC build: a cosmic-panel applet driving a Wayland layer-shell overlay \
+rendered on the GPU. For GNOME install ringlight-gnome instead."""
+assets = [
+    ["target/release/ringlight", "usr/bin/", "755"],
+    ["ringlight.desktop", "usr/share/applications/", "644"],
+    ["LICENSE", "usr/share/doc/ringlight-cosmic/", "644"],
+]

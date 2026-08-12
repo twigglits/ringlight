@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "gnome-extension/**"
+      - "gnome/gnome-extension/**"
 
   workflow_dispatch:
 
@@ -17,7 +17,7 @@ jobs:
       - name: Package and upload GNOME extension
         uses: murar8/gnome-extensions-action@0.1.0
         with:
-          source-dir: gnome-extension
+          source-dir: gnome/gnome-extension
           username: ${{ secrets.GNOME_EXTENSIONS_USERNAME }}
           password: ${{ secrets.GNOME_EXTENSIONS_PASSWORD }}
           accept-tos: true
