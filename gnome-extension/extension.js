@@ -72,6 +72,12 @@ class RinglightIndicator extends PanelMenu.Button {
         if (this._changedId)
             this._settings.disconnect(this._changedId);
         this._changedId = 0;
+        // The menu owns these and destroys them with itself, but EGO-L-002 only
+        // credits an explicit destroy for anything assigned to `this`.
+        this._onOff?.destroy();
+        this._auto?.destroy();
+        this._slider?.destroy();
+        this._onOff = this._auto = this._slider = null;
         super.destroy();
     }
 });
