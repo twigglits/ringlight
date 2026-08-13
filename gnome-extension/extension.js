@@ -20,24 +20,26 @@ const RENDER_MAX = 512;
 
 const Indicator = GObject.registerClass(
 class RinglightIndicator extends PanelMenu.Button {
+    // The menu widgets are locals, not fields: the menu owns them and destroys
+    // them with itself, and anything hung off `this` trips EGO-L-002/L-005 for
+    // not being destroyed and nulled a second time in disable().
     _init(settings, openPrefs) {
         super._init(0.5, 'Ringlight');
-        this._settings = settings;
 
         this.add_child(new St.Icon({
             icon_name: 'display-brightness-symbolic',
             style_class: 'system-status-icon',
         }));
 
-        this._onOff = new PopupMenu.PopupSwitchMenuItem(
+        const onOff = new PopupMenu.PopupSwitchMenuItem(
             'Ring Light', settings.get_boolean('enabled'));
-        this._onOff.connect('toggled', (_i, on) => settings.set_boolean('enabled', on));
-        this.menu.addMenuItem(this._onOff);
+        onOff.connect('toggled', (_i, on) => settings.set_boolean('enabled', on));
+        this.menu.addMenuItem(onOff);
 
-        this._auto = new PopupMenu.PopupSwitchMenuItem(
+        const auto = new PopupMenu.PopupSwitchMenuItem(
             'Follow camera', settings.get_boolean('auto-mode'));
-        this._auto.connect('toggled', (_i, on) => settings.set_boolean('auto-mode', on));
-        this.menu.addMenuItem(this._auto);
+        auto.connect('toggled', (_i, on) => settings.set_boolean('auto-mode', on));
+        this.menu.addMenuItem(auto);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
@@ -46,10 +48,10 @@ class RinglightIndicator extends PanelMenu.Button {
             icon_name: 'display-brightness-symbolic',
             style_class: 'popup-menu-icon',
         }));
-        this._slider = new Slider(settings.get_double('brightness'));
-        this._slider.connect('notify::value',
-            () => settings.set_double('brightness', this._slider.value));
-        row.add_child(this._slider);
+        const slider = new Slider(settings.get_double('brightness'));
+        slider.connect('notify::value',
+            () => settings.set_double('brightness', slider.value));
+        row.add_child(slider);
         this.menu.addMenuItem(row);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
@@ -57,28 +59,15 @@ class RinglightIndicator extends PanelMenu.Button {
         prefs.connect('activate', () => openPrefs());
         this.menu.addMenuItem(prefs);
 
-        this._changedId = settings.connect('changed', () => this._sync());
-    }
-
-    _sync() {
-        this._onOff.setToggleState(this._settings.get_boolean('enabled'));
-        this._auto.setToggleState(this._settings.get_boolean('auto-mode'));
-        const brightness = this._settings.get_double('brightness');
-        if (Math.abs(this._slider.value - brightness) > 0.001)
-            this._slider.value = brightness;
-    }
-
-    destroy() {
-        if (this._changedId)
-            this._settings.disconnect(this._changedId);
-        this._changedId = 0;
-        // The menu owns these and destroys them with itself, but EGO-L-002 only
-        // credits an explicit destroy for anything assigned to `this`.
-        this._onOff?.destroy();
-        this._auto?.destroy();
-        this._slider?.destroy();
-        this._onOff = this._auto = this._slider = null;
-        super.destroy();
+        // Keep the popup in step with changes made from the prefs window.
+        const changedId = settings.connect('changed', () => {
+            onOff.setToggleState(settings.get_boolean('enabled'));
+            auto.setToggleState(settings.get_boolean('auto-mode'));
+            const brightness = settings.get_double('brightness');
+            if (Math.abs(slider.value - brightness) > 0.001)
+                slider.value = brightness;
+        });
+        this.connect('destroy', () => settings.disconnect(changedId));
     }
 });
 
